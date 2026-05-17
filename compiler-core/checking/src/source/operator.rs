@@ -143,7 +143,7 @@ where
     };
 
     let operator_type = toolkit::instantiate_unifications(state, context, operator_type)?;
-    let operator_type = toolkit::collect_wanteds(state, context, operator_type)?;
+    let (operator_type, _) = toolkit::collect_wanteds(state, context, operator_type)?;
 
     let Some((left_type, operator_type)) =
         toolkit::decompose_function(state, context, operator_type)?
@@ -152,6 +152,7 @@ where
     };
 
     let operator_type = toolkit::instantiate_unifications(state, context, operator_type)?;
+    let (operator_type, _) = toolkit::collect_wanteds(state, context, operator_type)?;
     let Some((right_type, result_type)) =
         toolkit::decompose_function(state, context, operator_type)?
     else {

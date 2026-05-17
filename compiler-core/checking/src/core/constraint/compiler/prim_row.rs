@@ -146,7 +146,7 @@ where
             let fields = iter::chain(left, right).cloned();
             let result = context.intern_row(fields, right_row.tail());
 
-            Ok(Some(MatchInstance::Match(InstanceMatch::from_unifications(vec![(union, result)]))))
+            Ok(Some(MatchInstance::Match(InstanceMatch::from_unifications(vec![(union, result)], crate::Evidence::Compiler))))
         }
 
         // Matches when the left row has a tail and both the right row and output
@@ -170,10 +170,10 @@ where
             let left_result = context.intern_row(left_fields, None);
             let right_result = context.intern_row(right_fields, None);
 
-            Ok(Some(MatchInstance::Match(InstanceMatch::from_unifications(vec![
-                (left, left_result),
-                (right, right_result),
-            ]))))
+            Ok(Some(MatchInstance::Match(InstanceMatch::from_unifications(
+                vec![(left, left_result), (right, right_result)],
+                crate::Evidence::Compiler,
+            ))))
         }
 
         // Matches when the left row has a tail and at least one known field.
@@ -203,6 +203,7 @@ where
             Ok(Some(MatchInstance::Match(InstanceMatch {
                 unifications: vec![(union, result)],
                 constraints,
+                evidence: crate::Evidence::Compiler,
             })))
         }
 
@@ -233,7 +234,7 @@ where
 
             let result = context.intern_row(fields, tail_row.tail());
 
-            Ok(Some(MatchInstance::Match(InstanceMatch::from_unifications(vec![(row, result)]))))
+            Ok(Some(MatchInstance::Match(InstanceMatch::from_unifications(vec![(row, result)], crate::Evidence::Compiler))))
         }
         (Some(label_value), _, Some(row_row)) => {
             let mut remaining = vec![];
@@ -249,10 +250,10 @@ where
 
             if let Some(field_type) = found_type {
                 let tail_result = context.intern_row(remaining, row_row.tail());
-                Ok(Some(MatchInstance::Match(InstanceMatch::from_unifications(vec![
-                    (a, field_type),
-                    (tail, tail_result),
-                ]))))
+                Ok(Some(MatchInstance::Match(InstanceMatch::from_unifications(
+                    vec![(a, field_type), (tail, tail_result)],
+                    crate::Evidence::Compiler,
+                ))))
             } else {
                 Ok(Some(MatchInstance::Apart))
             }
@@ -311,7 +312,7 @@ where
             let constraints =
                 canonical::canonicalise(state, context, constraint)?.into_iter().collect();
 
-            Ok(Some(MatchInstance::Match(InstanceMatch::from_constraints(constraints))))
+            Ok(Some(MatchInstance::Match(InstanceMatch::from_constraints(constraints, crate::Evidence::Compiler))))
         }
     }
 }

@@ -63,6 +63,33 @@ where
     zonk_operator_map!(term_operator);
     zonk_operator_map!(type_operator);
 
+    resolve_evidence(state, context)?;
+
+    Ok(())
+}
+
+fn resolve_evidence<Q>(state: &mut CheckState, _context: &CheckContext<Q>) -> QueryResult<()>
+where
+    Q: ExternalQueries,
+{
+    let wanteds = mem::take(&mut state.checked.nodes.wanteds);
+    for (expression_id, expression_wanteds) in wanteds {
+        let mut evidences = vec![];
+        for wanted in expression_wanteds {
+            if let Some(evidence) = state.solved_evidence.get(&wanted) {
+                evidences.push(evidence.clone());
+            }
+        }
+
+        if !evidences.is_empty() {
+            let final_evidence = if evidences.len() == 1 {
+                evidences.pop().unwrap()
+            } else {
+                crate::Evidence::Multiple(evidences)
+            };
+            state.checked.nodes.evidence.insert(expression_id, final_evidence);
+        }
+    }
     Ok(())
 }
 

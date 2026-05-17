@@ -49,9 +49,11 @@ where
     };
 
     let expression_type = if binder::requires_instantiation(context, binder) {
-        toolkit::instantiate_constrained(state, context, expression_type)?
+        let (expression_type, _) = toolkit::instantiate_constrained(state, context, expression_type)?;
+        expression_type
     } else {
-        toolkit::collect_wanteds(state, context, expression_type)?
+        let (expression_type, _) = toolkit::collect_wanteds(state, context, expression_type)?;
+        expression_type
     };
 
     let binder_type = binder::check_binder(state, context, binder, expression_type)?;
@@ -63,7 +65,7 @@ where
     state.report_exhaustiveness(context, exhaustiveness);
 
     if has_missing {
-        state.push_wanted(context.prim.partial);
+        state.push_wanted(context, context.prim.partial);
     }
 
     Ok(())

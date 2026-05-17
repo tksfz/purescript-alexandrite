@@ -431,3 +431,32 @@ fn resolve_class_name(
             .unwrap_or_else(|| "<imported>".to_string())
     }
 }
+
+pub fn report_elaborated(engine: &QueryEngine, id: FileId) -> String {
+    let elaborated = engine.elaborated(id).unwrap();
+
+    let mut out = String::default();
+    writeln!(out, "module {}", elaborated.name).unwrap();
+
+    for decl in &elaborated.declarations {
+        match decl {
+            corefn::Declaration::Value { name, expression } => {
+                writeln!(out).unwrap();
+                writeln!(out, "value {} =", name).unwrap();
+                let json = serde_json::to_string_pretty(expression).unwrap();
+                for line in json.lines() {
+                    writeln!(out, "  {}", line).unwrap();
+                }
+            }
+            corefn::Declaration::Data { name, constructors } => {
+                writeln!(out).unwrap();
+                writeln!(out, "data {} =", name).unwrap();
+                for ctor in constructors {
+                    writeln!(out, "  | {} {:?}", ctor.name, ctor.fields).unwrap();
+                }
+            }
+        }
+    }
+
+    out
+}

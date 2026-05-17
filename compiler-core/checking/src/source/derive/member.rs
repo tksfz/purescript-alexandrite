@@ -63,11 +63,11 @@ where
                 result.class_id,
                 &result.arguments,
             )?;
-            generate_delegate_constraint(state, context, derived_type, class);
+            generate_delegate_constraint(state, context, derived_type, class)?;
             tools::solve_and_report_constraints(state, context)?;
         }
         DeriveStrategy::NewtypeDeriveConstraint { delegate_constraint } => {
-            state.push_wanted(delegate_constraint);
+            state.push_wanted(context, delegate_constraint)?;
             tools::solve_and_report_constraints(state, context)?;
         }
         DeriveStrategy::HeadOnly => {
@@ -107,7 +107,8 @@ fn generate_delegate_constraint<Q>(
     context: &CheckContext<Q>,
     derived_type: crate::core::TypeId,
     class: (files::FileId, indexing::TypeItemId),
-) where
+) -> QueryResult<()>
+where
     Q: ExternalQueries,
 {
     let skolem_type = state.fresh_rigid(context.queries, context.prim.t);
@@ -118,5 +119,6 @@ fn generate_delegate_constraint<Q>(
     let wanted_constraint = context.intern_application(class_type, applied_type);
 
     state.push_given(given_constraint, None);
-    state.push_wanted(wanted_constraint);
+    state.push_wanted(context, wanted_constraint)?;
+    Ok(())
 }

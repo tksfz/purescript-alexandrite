@@ -15,11 +15,13 @@ pub fn emit_constraint<Q>(
     state: &mut CheckState,
     class: (FileId, TypeItemId),
     argument: TypeId,
-) where
+) -> QueryResult<()>
+where
     Q: ExternalQueries,
 {
     let class_t = context.queries.intern_type(Type::Constructor(class.0, class.1));
-    state.push_wanted(context.intern_application(class_t, argument));
+    state.push_wanted(context, context.intern_application(class_t, argument))?;
+    Ok(())
 }
 
 pub fn emit_superclass_constraints<Q>(
@@ -50,7 +52,7 @@ where
 
     for superclass in superclasses {
         let specialised = SubstituteName::many(state, context, &bindings, superclass)?;
-        state.push_wanted(specialised);
+        state.push_wanted(context, specialised)?;
     }
 
     Ok(())

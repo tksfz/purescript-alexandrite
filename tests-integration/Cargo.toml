@@ -8,6 +8,7 @@ build = "build.rs"
 analyzer = { version = "0.1.0", path = "../compiler-lsp/analyzer" }
 async-lsp = "0.2.2"
 checking = { version = "0.1.0", path = "../compiler-core/checking" }
+corefn = { version = "0.1.0", path = "../compiler-core/corefn" }
 diagnostics = { version = "0.1.0", path = "../compiler-core/diagnostics" }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
@@ -23,6 +24,7 @@ stabilizing = { version = "0.1.0", path = "../compiler-core/stabilizing" }
 sugar = { version = "0.1.0", path = "../compiler-core/sugar" }
 syntax = { version = "0.1.0", path = "../compiler-core/syntax" }
 tabled = "0.20.0"
+serde_json = "1.0"
 url = "2.5.7"
 
 [build-dependencies]

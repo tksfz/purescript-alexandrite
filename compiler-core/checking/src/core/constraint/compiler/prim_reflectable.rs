@@ -62,7 +62,7 @@ where
     Ok(match can_unify(state, context, actual, expected)? {
         CanUnify::Apart => MatchInstance::Apart,
         CanUnify::Equal | CanUnify::Unify => {
-            MatchInstance::Match(InstanceMatch::from_unifications(vec![(actual, expected)]))
+            MatchInstance::Match(InstanceMatch::from_unifications(vec![(actual, expected)], crate::Evidence::Compiler))
         }
     })
 }

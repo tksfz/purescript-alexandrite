@@ -122,10 +122,10 @@ where
 
             let head_result = intern_symbol(context, &head_char.to_string());
             let tail_result = intern_symbol(context, chars.as_str());
-            MatchInstance::Match(InstanceMatch::from_unifications(vec![
-                (head, head_result),
-                (tail, tail_result),
-            ]))
+            MatchInstance::Match(InstanceMatch::from_unifications(
+                vec![(head, head_result), (tail, tail_result)],
+                crate::Evidence::Compiler,
+            ))
         }
         _ => matching::blocking_constraint(state, context, &[head, tail, symbol])?,
     };

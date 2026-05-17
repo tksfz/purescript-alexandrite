@@ -223,6 +223,8 @@ version = "0.1.0"
 dependencies = [
  "building-types",
  "checking",
+ "corefn",
+ "elaborating",
  "files",
  "indexing",
  "interner",
@@ -247,6 +249,7 @@ dependencies = [
 name = "building-types"
 version = "0.1.0"
 dependencies = [
+ "corefn",
  "files",
  "parking_lot",
  "rustc-hash 2.1.1",
@@ -312,6 +315,7 @@ dependencies = [
  "indexmap",
  "interner",
  "itertools 0.14.0",
+ "la-arena",
  "lowering",
  "parking_lot",
  "parsing",
@@ -461,6 +465,18 @@ checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
 dependencies = [
  "cfg-if",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "corefn"
+version = "0.1.0"
+dependencies = [
+ "files",
+ "indexing",
+ "la-arena",
+ "rustc-hash 2.1.1",
+ "serde",
+ "smol_str",
 ]
 
 [[package]]
@@ -631,6 +647,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "elaborating"
+version = "0.1.0"
+dependencies = [
+ "building-types",
+ "checking",
+ "corefn",
+ "files",
+ "indexing",
+ "itertools 0.14.0",
+ "la-arena",
+ "lowering",
+ "resolving",
+ "rustc-hash 2.1.1",
+ "smol_str",
+]
+
+[[package]]
 name = "encode_unicode"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -671,6 +704,7 @@ dependencies = [
  "indexmap",
  "la-arena",
  "rustc-hash 2.1.1",
+ "serde",
 ]
 
 [[package]]
@@ -2498,6 +2532,7 @@ dependencies = [
  "analyzer",
  "async-lsp",
  "checking",
+ "corefn",
  "diagnostics",
  "files",
  "glob",

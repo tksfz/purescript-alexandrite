@@ -3,6 +3,7 @@
 pub mod improvements;
 
 use std::collections::VecDeque;
+use std::iter;
 
 use building_types::QueryResult;
 use itertools::Itertools;
@@ -11,7 +12,7 @@ use rustc_hash::FxHashSet;
 use crate::context::CheckContext;
 use crate::core::constraint::canonical::CanonicalConstraint;
 use crate::core::constraint::matching::MatchInstance;
-use crate::core::constraint::{CanonicalConstraintId, canonical, compiler};
+use crate::core::constraint::{self, CanonicalConstraintId, canonical, compiler};
 use crate::core::substitute::{NameToType, SubstituteName};
 use crate::core::walk::{TypeWalker, WalkAction, walk_type};
 use crate::core::{CheckedClass, KindOrType, Name, Type, TypeId, normalise, toolkit};
@@ -198,7 +199,7 @@ where
     safe_loop! {
         let given_ids = given.iter().map(|g| g.id).collect_vec();
         let substituted_ids = canonical::substitute_canonicals(state, context, &substitution, &given_ids)?;
-        let given_substituted = iter::zip(&given, substituted_ids)
+        let given_substituted = iter::zip(&given, substituted_ids.clone())
             .map(|(g, id)| ElaboratedGivenId { id, source: g.source })
             .collect_vec();
 

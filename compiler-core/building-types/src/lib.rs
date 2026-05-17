@@ -19,6 +19,7 @@ pub enum QueryKey {
     Bracketed(FileId),
     Sectioned(FileId),
     Checked(FileId),
+    Elaborated(FileId),
 }
 
 #[derive(Error, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -56,6 +57,8 @@ pub trait QueryProxy {
     fn bracketed(&self, id: FileId) -> QueryResult<Self::Bracketed>;
 
     fn sectioned(&self, id: FileId) -> QueryResult<Self::Sectioned>;
+
+    fn elaborated(&self, id: FileId) -> QueryResult<Arc<corefn::CoreFnModule>>;
 
     fn prim_id(&self) -> FileId;
 

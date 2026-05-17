@@ -17,6 +17,7 @@ use syntax::{SyntaxNodePtr, cst};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct IndexedModule {
+    pub name: Option<SmolStr>,
     pub kind: ExportKind,
     pub items: IndexingItems,
     pub imports: IndexingImports,
@@ -152,6 +153,7 @@ pub struct IndexingPairs {
     declaration_to_type: Vec<(DeclarationId, TypeItemId)>,
     constructor_to_term: Vec<(DataConstructorId, TermItemId)>,
     class_member_to_term: Vec<(ClassMemberId, TermItemId)>,
+    instance_to_term: Vec<(InstanceId, TermItemId)>,
 }
 
 impl IndexingPairs {
@@ -197,6 +199,12 @@ impl IndexingPairs {
         })
     }
 
+    pub fn instance_to_term(&self, id: InstanceId) -> Option<TermItemId> {
+        self.instance_to_term.iter().find_map(move |(instance_id, term_id)| {
+            if *instance_id == id { Some(*term_id) } else { None }
+        })
+    }
+
     pub fn instance_chain_id(&self, id: InstanceId) -> Option<InstanceChainId> {
         self.instance_chain.iter().find_map(
             |(chain_id, instance_id)| {
@@ -216,7 +224,7 @@ impl IndexingPairs {
 }
 
 pub fn index_module(cst: &cst::Module, stabilized: &StabilizedModule) -> IndexedModule {
-    let algorithm::State { kind, items, imports, pairs, errors, .. } =
+    let algorithm::State { name, kind, items, imports, pairs, errors, .. } =
         algorithm::index_module(cst, stabilized);
-    IndexedModule { kind, items, imports, pairs, errors }
+    IndexedModule { name, kind, items, imports, pairs, errors }
 }

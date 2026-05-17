@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+corefn = { version = "0.1.0", path = "../corefn" }
 files = { version = "0.1.0", path = "../files" }
 parking_lot = "0.12.5"
 rustc-hash = "2.1.1"

@@ -64,7 +64,7 @@ where
         constrained: TypeId,
         t2: TypeId,
     ) -> QueryResult<bool> {
-        state.push_wanted(constraint);
+        state.push_wanted(context, constraint)?;
         subtype_with::<Self, Q>(state, context, constrained, t2)
     }
 }

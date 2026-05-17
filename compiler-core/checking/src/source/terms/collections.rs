@@ -18,7 +18,9 @@ where
 
     if should_instantiate_record_field(context, expression) {
         let id = toolkit::instantiate_unifications(state, context, id)?;
-        toolkit::collect_wanteds(state, context, id)
+        let (id, wanteds) = toolkit::collect_wanteds(state, context, id)?;
+        state.checked.nodes.wanteds.insert(expression, wanteds);
+        Ok(id)
     } else {
         Ok(id)
     }
@@ -69,7 +71,8 @@ where
 {
     let id = toolkit::lookup_term_variable(state, context, resolution)?;
     let id = toolkit::instantiate_unifications(state, context, id)?;
-    toolkit::collect_wanteds(state, context, id)
+    let (id, _) = toolkit::collect_wanteds(state, context, id)?;
+    Ok(id)
 }
 
 #[derive(Copy, Clone, Debug)]

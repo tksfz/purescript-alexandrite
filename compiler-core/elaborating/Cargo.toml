@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-analyzer = { version = "0.1.0", path = "../../compiler-lsp/analyzer" }
 building-types = { version = "0.1.0", path = "../building-types" }
 checking = { version = "0.1.0", path = "../checking" }
 corefn = { version = "0.1.0", path = "../corefn" }

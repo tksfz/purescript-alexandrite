@@ -328,9 +328,10 @@ where
 
     let mut superclasses = FxHashSet::default();
     for &constraint in &constraints {
-        for superclass in elaborate::elaborate_superclasses(state, context, &[constraint])? {
-            if superclass != constraint {
-                superclasses.insert(superclass);
+        let input = [elaborate::ElaboratedGivenId { id: constraint, source: None }];
+        for superclass in elaborate::elaborate_superclasses(state, context, &input)? {
+            if superclass.id != constraint {
+                superclasses.insert(superclass.id);
             }
         }
     }

@@ -6,7 +6,7 @@ pub mod source;
 pub mod state;
 
 pub mod core;
-pub use core::{Type, TypeId};
+pub use core::{Type, TypeId, constraint};
 
 pub mod interners;
 pub use interners::CoreInterners;
@@ -73,6 +73,7 @@ pub enum Evidence {
     Given(lowering::TypeId),
     Superclass(Box<Evidence>, usize),
     Compiler,
+    Multiple(Vec<Evidence>),
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -86,6 +87,7 @@ pub struct CheckedNodes {
     pub term_operator: FxHashMap<lowering::TermOperatorId, OperatorBranchTypes>,
     pub type_operator: FxHashMap<lowering::TypeOperatorId, OperatorBranchTypes>,
     pub evidence: FxHashMap<lowering::ExpressionId, Evidence>,
+    pub wanteds: FxHashMap<lowering::ExpressionId, Vec<constraint::CanonicalConstraintId>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

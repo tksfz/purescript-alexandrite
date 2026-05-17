@@ -5,7 +5,7 @@ use building_types::QueryResult;
 
 use crate::context::CheckContext;
 use crate::core::substitute::{NameToType, SubstituteName};
-use crate::core::{ForallBinder, Type, TypeId, normalise, signature, unification};
+use crate::core::{ForallBinder, Type, TypeId, constraint, normalise, signature, unification};
 use crate::error::ErrorKind;
 use crate::source::types;
 use crate::state::CheckState;
@@ -20,6 +20,7 @@ pub struct ApplicationAnalysis {
 pub struct GenericApplication {
     pub argument: TypeId,
     pub result: TypeId,
+    pub wanteds: Vec<constraint::CanonicalConstraintId>,
 }
 
 fn analyse_function_application_step<Q>(
@@ -134,11 +135,14 @@ where
         return Ok(None);
     };
 
+    let mut wanteds = vec![];
     for constraint in constraints {
-        state.push_wanted(constraint);
+        if let Some(wanted) = state.push_wanted(context, constraint)? {
+            wanteds.push(wanted);
+        }
     }
 
-    Ok(Some(GenericApplication { argument, result }))
+    Ok(Some(GenericApplication { argument, result, wanteds }))
 }
 
 pub fn check_function_application<Q>(
@@ -175,11 +179,12 @@ pub fn check_function_term_application<Q>(
 where
     Q: ExternalQueries,
 {
-    let Some(GenericApplication { argument, result }) =
+    let Some(GenericApplication { argument, result, wanteds }) =
         check_generic_application(state, context, function)?
     else {
         return Ok(context.unknown("invalid function application"));
     };
+    state.checked.nodes.wanteds.insert(expression_id, wanteds);
     super::check_expression(state, context, expression_id, argument)?;
     Ok(result)
 }
@@ -249,11 +254,12 @@ where
         let Some(element) = element else { return Ok(context.unknown("missing infix element")) };
 
         let tick_type = super::infer_expression(state, context, *tick)?;
-        let Some(GenericApplication { argument, result }) =
+        let Some(GenericApplication { argument, result, wanteds }) =
             check_generic_application(state, context, tick_type)?
         else {
             return Ok(context.unknown("invalid function application"));
         };
+        state.checked.nodes.wanteds.insert(*tick, wanteds);
         unification::subtype(state, context, infix_type, argument)?;
         let applied_tick = result;
 

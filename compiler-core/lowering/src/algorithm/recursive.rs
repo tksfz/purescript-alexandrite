@@ -472,12 +472,45 @@ fn lower_expression_kind(
         }
         cst::Expression::ExpressionSection(_) => ExpressionKind::Section,
         cst::Expression::ExpressionHole(_) => ExpressionKind::Hole,
-        cst::Expression::ExpressionString(_) => ExpressionKind::String,
-        cst::Expression::ExpressionChar(_) => ExpressionKind::Char,
+        cst::Expression::ExpressionString(cst) => {
+            let (kind, value) = if let Some(token) = cst.raw_string_token() {
+                (StringKind::RawString, Some(string_text(token)))
+            } else if let Some(token) = cst.string_token() {
+                (StringKind::String, Some(string_text(token)))
+            } else {
+                (StringKind::String, None)
+            };
+            ExpressionKind::String { kind, value }
+        }
+        cst::Expression::ExpressionChar(cst) => {
+            let value = cst.char_token().and_then(|token| {
+                let text = token.text();
+                let text = text.strip_prefix('\'').and_then(|t| t.strip_suffix('\''))?;
+                text.chars().next()
+            });
+            ExpressionKind::Char { value }
+        }
         cst::Expression::ExpressionTrue(_) => ExpressionKind::Boolean { boolean: true },
         cst::Expression::ExpressionFalse(_) => ExpressionKind::Boolean { boolean: false },
-        cst::Expression::ExpressionInteger(_) => ExpressionKind::Integer,
-        cst::Expression::ExpressionNumber(_) => ExpressionKind::Number,
+        cst::Expression::ExpressionInteger(cst) => {
+            let value = cst.integer_token().and_then(|token| {
+                let text = token.text();
+                let integer = if let Some(hex) = text.strip_prefix("0x") {
+                    let clean = hex.replace_smolstr("_", "");
+                    i32::from_str_radix(&clean, 16).ok()?
+                } else {
+                    let clean = text.replace_smolstr("_", "");
+                    clean.parse().ok()?
+                };
+                if cst.minus_token().is_some() { Some(-integer) } else { Some(integer) }
+            });
+            ExpressionKind::Integer { value }
+        }
+        cst::Expression::ExpressionNumber(cst) => {
+            let negative = cst.minus_token().is_some();
+            let value = cst.number_token().map(|token| SmolStr::from(token.text()));
+            ExpressionKind::Number { negative, value }
+        }
         cst::Expression::ExpressionArray(cst) => {
             let array = cst.children().map(|cst| lower_expression(state, context, &cst)).collect();
             ExpressionKind::Array { array }

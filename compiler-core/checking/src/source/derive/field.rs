@@ -95,14 +95,14 @@ where
                 generate_constraint(state, context, argument, class, class1)?;
             } else if is_type_to_type_variable(state, context, function)? {
                 if let Some(class1) = class1 {
-                    tools::emit_constraint(context, state, class1, function);
+                    tools::emit_constraint(context, state, class1, argument)?;
                 }
-                tools::emit_constraint(context, state, class, argument);
+                tools::emit_constraint(context, state, class, argument)?;
             } else {
-                tools::emit_constraint(context, state, class, type_id);
+                tools::emit_constraint(context, state, class, type_id)?;
             }
-        }
-        Type::Row(row_id) => {
+            }
+            Type::Row(row_id) => {
             let row = context.lookup_row_type(row_id);
             for field in row.fields.iter() {
                 generate_constraint(state, context, field.id, class, class1)?;
@@ -110,9 +110,9 @@ where
             if let Some(tail) = row.tail {
                 generate_constraint(state, context, tail, class, class1)?;
             }
-        }
-        _ => tools::emit_constraint(context, state, class, type_id),
-    }
+            }
+            _ => tools::emit_constraint(context, state, class, type_id)?,
+            }
 
     Ok(())
 }

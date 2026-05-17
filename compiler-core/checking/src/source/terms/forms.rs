@@ -96,7 +96,8 @@ where
 
     let result_type = if let Some(body) = expression {
         let body_type = super::infer_expression(state, context, body)?;
-        toolkit::instantiate_constrained(state, context, body_type)?
+        let (body_type, _) = toolkit::instantiate_constrained(state, context, body_type)?;
+        body_type
     } else {
         state.fresh_unification(context.queries, context.prim.t)
     };
@@ -156,7 +157,7 @@ where
     state.report_exhaustiveness(context, exhaustiveness);
 
     if has_missing {
-        state.push_wanted(context.prim.partial);
+        state.push_wanted(context, context.prim.partial)?;
     }
 
     Ok(function_type)
@@ -224,9 +225,10 @@ where
     };
 
     let mut trunk_types = vec![];
-    for trunk in trunk.iter() {
-        let trunk_type = super::infer_expression(state, context, *trunk)?;
-        let trunk_type = toolkit::instantiate_constrained(state, context, trunk_type)?;
+    for &trunk in trunk.iter() {
+        let trunk_type = super::infer_expression(state, context, trunk)?;
+        let (trunk_type, wanteds) = toolkit::instantiate_constrained(state, context, trunk_type)?;
+        state.checked.nodes.wanteds.insert(trunk, wanteds);
         trunk_types.push(trunk_type);
     }
 
@@ -259,7 +261,7 @@ where
         if let CaseOfMode::Infer = mode {
             return Ok(context.intern_constrained(context.prim.partial, expected));
         } else {
-            state.push_wanted(context.prim.partial)
+            state.push_wanted(context, context.prim.partial)?;
         }
     }
 

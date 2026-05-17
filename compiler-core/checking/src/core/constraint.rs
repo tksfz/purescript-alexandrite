@@ -184,9 +184,11 @@ where
         };
 
         let mut blocked = FxHashSet::default();
+        let given_ids = given.iter().map(|g| g.id).collect_vec();
 
         match match_given_instance(state, context, wanted, &given)? {
             MatchInstance::Match(instance) => {
+                state.solved_evidence.insert(wanted, instance.evidence.clone());
                 work.extend_from_match(instance);
                 continue 'work;
             }
@@ -196,8 +198,9 @@ where
             MatchInstance::Apart => (),
         }
 
-        match compiler::match_compiler_instance(state, context, wanted, &given)? {
+        match compiler::match_compiler_instance(state, context, wanted, &given_ids)? {
             Some(MatchInstance::Match(instance)) => {
+                state.solved_evidence.insert(wanted, instance.evidence.clone());
                 work.extend_from_match(instance);
                 continue 'work;
             }
@@ -211,6 +214,7 @@ where
         'chain: for chain in search.chains {
             match match_instance_chain(state, context, wanted, &chain)? {
                 MatchInstance::Match(instance) => {
+                    state.solved_evidence.insert(wanted, instance.evidence.clone());
                     work.extend_from_match(instance);
                     continue 'work;
                 }

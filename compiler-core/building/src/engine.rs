@@ -124,6 +124,7 @@ struct DerivedStorage {
     bracketed: Shards<FileId, DerivedState<Arc<sugar::Bracketed>>>,
     sectioned: Shards<FileId, DerivedState<Arc<sugar::Sectioned>>>,
     checked: Shards<FileId, DerivedState<Arc<CheckedModule>>>,
+    elaborated: Shards<FileId, DerivedState<Arc<corefn::CoreFnModule>>>,
 }
 
 #[derive(Default)]
@@ -455,6 +456,7 @@ impl QueryEngine {
                 QueryKey::Bracketed(k) => derived_changed!(bracketed, k),
                 QueryKey::Sectioned(k) => derived_changed!(sectioned, k),
                 QueryKey::Checked(k) => derived_changed!(checked, k),
+                QueryKey::Elaborated(k) => derived_changed!(elaborated, k),
             }
         }
 
@@ -790,6 +792,23 @@ impl QueryEngine {
             },
         )
     }
+
+    pub fn elaborated(&self, id: FileId) -> QueryResult<Arc<corefn::CoreFnModule>> {
+        self.query(
+            QueryKey::Elaborated(id),
+            id,
+            |derived| &derived.elaborated,
+            |this| {
+                let indexed = this.indexed(id)?;
+                let lowered = this.lowered(id)?;
+                let checked = this.checked(id)?;
+                let resolved = this.resolved(id)?;
+                let elaborated =
+                    elaborating::elaborate_module(id, &lowered, &checked, &resolved, &indexed)?;
+                Ok(Arc::new(elaborated))
+            },
+        )
+    }
 }
 
 impl QueryEngine {
@@ -845,6 +864,10 @@ impl QueryProxy for QueryEngine {
 
     fn sectioned(&self, id: FileId) -> QueryResult<Self::Sectioned> {
         QueryEngine::sectioned(self, id)
+    }
+
+    fn elaborated(&self, id: FileId) -> QueryResult<Arc<corefn::CoreFnModule>> {
+        QueryEngine::elaborated(self, id)
     }
 
     fn prim_id(&self) -> FileId {

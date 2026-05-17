@@ -203,6 +203,7 @@ pub struct CheckState {
     pub implications: Implications,
     pub canonicals: Canonicals,
     pub canonical_errors: FxHashMap<CanonicalConstraintId, Vec<ErrorKind>>,
+    pub solved_evidence: FxHashMap<CanonicalConstraintId, crate::Evidence>,
 
     pub defer_expansion: bool,
     pub depth: Depth,
@@ -221,6 +222,7 @@ impl CheckState {
             implications: Default::default(),
             canonicals: Default::default(),
             canonical_errors: Default::default(),
+            solved_evidence: Default::default(),
             defer_expansion: Default::default(),
             depth: Depth(0),
             crumbs: Default::default(),
@@ -281,8 +283,16 @@ impl CheckState {
         self.checked.errors.push(CheckError { kind, crumbs });
     }
 
-    pub fn push_wanted(&mut self, constraint: TypeId) {
+    pub fn push_wanted<Q>(
+        &mut self,
+        context: &CheckContext<Q>,
+        constraint: TypeId,
+    ) -> QueryResult<Option<CanonicalConstraintId>>
+    where
+        Q: ExternalQueries,
+    {
         self.implications.current_mut().wanted.push_back(constraint);
+        constraint::canonical::canonicalise(self, context, constraint)
     }
 
     pub fn push_given(&mut self, constraint: TypeId, source: Option<lowering::TypeId>) {

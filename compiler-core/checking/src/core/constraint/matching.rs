@@ -1,11 +1,13 @@
 //! Implements matching functions for constraints.
 
 use std::iter;
+use std::num::NonZeroU32;
 
 use building_types::QueryResult;
 use files::FileId;
 use indexing::TypeItemId;
 use itertools::Itertools;
+use la_arena::{Idx, RawIdx};
 use lowering::TypeItemIr;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -63,9 +65,7 @@ impl InstanceMatch {
         InstanceMatch {
             unifications: vec![],
             constraints: vec![],
-            evidence: crate::Evidence::Given(lowering::TypeId::from_raw(la_arena::RawIdx::from_u32(
-                0,
-            ))), // Placeholder
+            evidence: crate::Evidence::Given(lowering::TypeId::new(NonZeroU32::new(1).unwrap())), // Placeholder
         }
     }
 

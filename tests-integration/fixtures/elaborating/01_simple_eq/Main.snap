@@ -1,0 +1,34 @@
+---
+source: target/debug/build/tests-integration-d785e929c4a3c5a8/out/elaborating_generated.rs
+assertion_line: 12
+expression: report
+---
+module Main
+
+value test =
+  {
+    "App": [
+      {
+        "App": [
+          {
+            "Var": {
+              "Module": [
+                9,
+                0
+              ]
+            }
+          },
+          {
+            "Literal": {
+              "Int": 1
+            }
+          }
+        ]
+      },
+      {
+        "Literal": {
+          "Int": 2
+        }
+      }
+    ]
+  }

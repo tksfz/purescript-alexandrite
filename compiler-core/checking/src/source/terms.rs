@@ -87,7 +87,8 @@ where
     }
 
     let result_type = infer_expression_core(state, context, expression)?;
-    let result_type = toolkit::instantiate_constrained(state, context, result_type)?;
+    let (result_type, wanteds) = toolkit::instantiate_constrained(state, context, result_type)?;
+    state.checked.nodes.wanteds.insert(expression, wanteds);
 
     unification::subtype(state, context, result_type, current)?;
 
@@ -140,7 +141,8 @@ where
         }
         _ => {
             let inferred = infer_expression_quiet(state, context, expression)?;
-            let inferred = toolkit::instantiate_constrained(state, context, inferred)?;
+            let (inferred, wanteds) = toolkit::instantiate_constrained(state, context, inferred)?;
+            state.checked.nodes.wanteds.insert(expression, wanteds);
             unification::subtype(state, context, inferred, expected)?;
             Ok(inferred)
         }
@@ -196,7 +198,8 @@ where
     let parameter_types = parameter_types.collect_vec();
 
     let result_type = infer_expression_core(state, context, expression)?;
-    let result_type = toolkit::instantiate_constrained(state, context, result_type)?;
+    let (result_type, wanteds) = toolkit::instantiate_constrained(state, context, result_type)?;
+    state.checked.nodes.wanteds.insert(expression, wanteds);
 
     Ok(context.intern_function_list(&parameter_types, result_type))
 }
@@ -313,15 +316,15 @@ where
             Ok(state.fresh_unification(context.queries, kind))
         }
 
-        lowering::ExpressionKind::String => Ok(context.prim.string),
+        lowering::ExpressionKind::String { .. } => Ok(context.prim.string),
 
-        lowering::ExpressionKind::Char => Ok(context.prim.char),
+        lowering::ExpressionKind::Char { .. } => Ok(context.prim.char),
 
         lowering::ExpressionKind::Boolean { .. } => Ok(context.prim.boolean),
 
-        lowering::ExpressionKind::Integer => Ok(context.prim.int),
+        lowering::ExpressionKind::Integer { .. } => Ok(context.prim.int),
 
-        lowering::ExpressionKind::Number => Ok(context.prim.number),
+        lowering::ExpressionKind::Number { .. } => Ok(context.prim.number),
 
         lowering::ExpressionKind::Array { array } => {
             collections::infer_array(state, context, array)

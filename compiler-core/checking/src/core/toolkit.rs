@@ -515,18 +515,21 @@ pub fn collect_wanteds<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
     mut id: TypeId,
-) -> QueryResult<TypeId>
+) -> QueryResult<(TypeId, Vec<constraint::CanonicalConstraintId>)>
 where
     Q: ExternalQueries,
 {
+    let mut wanteds = vec![];
     safe_loop! {
         id = normalise::expand(state, context, id)?;
         match context.lookup_type(id) {
             Type::Constrained(constraint, constrained) => {
-                state.push_wanted(constraint);
+                if let Some(wanted) = state.push_wanted(context, constraint)? {
+                    wanteds.push(wanted);
+                }
                 id = constrained;
             }
-            _ => return Ok(id),
+            _ => return Ok((id, wanteds)),
         }
     }
 }
@@ -577,7 +580,7 @@ pub fn instantiate_constrained<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
     id: TypeId,
-) -> QueryResult<TypeId>
+) -> QueryResult<(TypeId, Vec<constraint::CanonicalConstraintId>)>
 where
     Q: ExternalQueries,
 {

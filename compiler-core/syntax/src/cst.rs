@@ -1198,3 +1198,26 @@ has_token!(
     BinderChar
     | char_token() -> CHAR
 );
+
+has_token!(
+    ExpressionInteger
+    | minus_token() -> MINUS
+    | integer_token() -> INTEGER
+);
+
+has_token!(
+    ExpressionNumber
+    | minus_token() -> MINUS
+    | number_token() -> NUMBER
+);
+
+has_token!(
+    ExpressionString
+    | string_token() -> STRING
+    | raw_string_token() -> RAW_STRING
+);
+
+has_token!(
+    ExpressionChar
+    | char_token() -> CHAR
+);

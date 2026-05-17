@@ -6,7 +6,7 @@ use rowan::ast::{AstNode, AstPtr};
 use syntax::PureScript;
 
 pub struct AstId<N: AstNode<Language = PureScript>> {
-    pub(crate) id: NonZeroU32,
+    pub id: NonZeroU32,
     phantom: PhantomData<fn() -> AstPtr<N>>,
 }
 
