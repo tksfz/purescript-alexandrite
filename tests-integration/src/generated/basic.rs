@@ -167,6 +167,120 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
         }))
     };
 
+    let mul_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let a = match args[0] {
+                evaluating::Value::Int(i) => i,
+                _ => 0,
+            };
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let b = match args2[0] {
+                    evaluating::Value::Int(i) => i,
+                    _ => 0,
+                };
+                Ok(evaluating::Value::Int(a * b))
+            })))
+        }))
+    };
+
+    let div_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let a = match args[0] {
+                evaluating::Value::Int(i) => i,
+                _ => 0,
+            };
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let b = match args2[0] {
+                    evaluating::Value::Int(i) => i,
+                    _ => 0,
+                };
+                if b == 0 {
+                    Ok(evaluating::Value::Int(0))
+                } else {
+                    Ok(evaluating::Value::Int(a / b))
+                }
+            })))
+        }))
+    };
+
+    let mod_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let a = match args[0] {
+                evaluating::Value::Int(i) => i,
+                _ => 0,
+            };
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let b = match args2[0] {
+                    evaluating::Value::Int(i) => i,
+                    _ => 0,
+                };
+                if b == 0 {
+                    Ok(evaluating::Value::Int(0))
+                } else {
+                    Ok(evaluating::Value::Int(a % b))
+                }
+            })))
+        }))
+    };
+
+    let lt_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let a = args[0].clone();
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let b = args2[0].clone();
+                match (a.clone(), b) {
+                    (evaluating::Value::Int(i1), evaluating::Value::Int(i2)) => {
+                        Ok(evaluating::Value::Boolean(i1 < i2))
+                    }
+                    _ => Ok(evaluating::Value::Boolean(false)),
+                }
+            })))
+        }))
+    };
+
+    let gt_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let a = args[0].clone();
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let b = args2[0].clone();
+                match (a.clone(), b) {
+                    (evaluating::Value::Int(i1), evaluating::Value::Int(i2)) => {
+                        Ok(evaluating::Value::Boolean(i1 > i2))
+                    }
+                    _ => Ok(evaluating::Value::Boolean(false)),
+                }
+            })))
+        }))
+    };
+
+    let append_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let a = match &args[0] {
+                evaluating::Value::String(s) => s.clone(),
+                _ => SmolStr::new(""),
+            };
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let b = match &args2[0] {
+                    evaluating::Value::String(s) => s.clone(),
+                    _ => SmolStr::new(""),
+                };
+                let mut res = String::from(a.as_str());
+                res.push_str(b.as_str());
+                Ok(evaluating::Value::String(SmolStr::from(res)))
+            })))
+        }))
+    };
+
+    let string_length_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let a = match &args[0] {
+                evaluating::Value::String(s) => s.len() as i32,
+                _ => 0,
+            };
+            Ok(evaluating::Value::Int(a))
+        }))
+    };
+
     let bind_ffi = || {
         evaluating::Value::Foreign(Arc::new(|args| {
             let m = args[0].clone();
@@ -241,6 +355,13 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
     env.locals.insert(SmolStr::new("eq"), eq_ffi());
     env.locals.insert(SmolStr::new("add"), add_ffi());
     env.locals.insert(SmolStr::new("sub"), sub_ffi());
+    env.locals.insert(SmolStr::new("mul"), mul_ffi());
+    env.locals.insert(SmolStr::new("div"), div_ffi());
+    env.locals.insert(SmolStr::new("mod"), mod_ffi());
+    env.locals.insert(SmolStr::new("lt"), lt_ffi());
+    env.locals.insert(SmolStr::new("gt"), gt_ffi());
+    env.locals.insert(SmolStr::new("append"), append_ffi());
+    env.locals.insert(SmolStr::new("length"), string_length_ffi());
     env.locals.insert(SmolStr::new("log"), log_ffi());
     env.locals.insert(SmolStr::new("bind"), bind_ffi());
     env.locals.insert(SmolStr::new("discard"), discard_ffi());
@@ -269,6 +390,13 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
                         "eq" => Some(eq_ffi()),
                         "add" => Some(add_ffi()),
                         "sub" => Some(sub_ffi()),
+                        "mul" => Some(mul_ffi()),
+                        "div" => Some(div_ffi()),
+                        "mod" => Some(mod_ffi()),
+                        "lt" => Some(lt_ffi()),
+                        "gt" => Some(gt_ffi()),
+                        "append" => Some(append_ffi()),
+                        "length" => Some(string_length_ffi()),
                         "log" => Some(log_ffi()),
                         "bind" => Some(bind_ffi()),
                         "discard" => Some(discard_ffi()),
@@ -290,7 +418,6 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
                     let target_indexed = if *f_id == id {
                         &indexed
                     } else {
-                        // For simplicity, we only handle operators in the same file for now in this test runner.
                         &indexed
                     };
                     
@@ -299,6 +426,13 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
                             "eq" => Some(eq_ffi()),
                             "add" => Some(add_ffi()),
                             "sub" => Some(sub_ffi()),
+                            "mul" => Some(mul_ffi()),
+                            "div" => Some(div_ffi()),
+                            "mod" => Some(mod_ffi()),
+                            "lt" => Some(lt_ffi()),
+                            "gt" => Some(gt_ffi()),
+                            "append" => Some(append_ffi()),
+                            "length" => Some(string_length_ffi()),
                             "log" => Some(log_ffi()),
                             "bind" => Some(bind_ffi()),
                             "discard" => Some(discard_ffi()),
