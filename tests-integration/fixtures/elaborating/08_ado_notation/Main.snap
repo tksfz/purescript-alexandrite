@@ -1,0 +1,114 @@
+---
+source: target/debug/build/tests-integration-d785e929c4a3c5a8/out/elaborating_generated.rs
+assertion_line: 12
+expression: report
+---
+module Main
+
+value test =
+  {
+    "App": [
+      {
+        "App": [
+          {
+            "Var": {
+              "Module": [
+                9,
+                1
+              ]
+            }
+          },
+          {
+            "App": [
+              {
+                "App": [
+                  {
+                    "Var": {
+                      "Module": [
+                        9,
+                        0
+                      ]
+                    }
+                  },
+                  {
+                    "Abs": [
+                      {
+                        "Var": "x"
+                      },
+                      {
+                        "Abs": [
+                          {
+                            "Var": "y"
+                          },
+                          {
+                            "App": [
+                              {
+                                "App": [
+                                  {
+                                    "Var": {
+                                      "Module": [
+                                        9,
+                                        4
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "Var": {
+                                      "Local": "x"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "Var": {
+                                  "Local": "y"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "App": [
+                  {
+                    "Var": {
+                      "Module": [
+                        9,
+                        2
+                      ]
+                    }
+                  },
+                  {
+                    "Literal": {
+                      "Int": 20
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "App": [
+          {
+            "Var": {
+              "Module": [
+                9,
+                2
+              ]
+            }
+          },
+          {
+            "Literal": {
+              "Int": 22
+            }
+          }
+        ]
+      }
+    ]
+  }

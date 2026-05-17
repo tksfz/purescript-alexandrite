@@ -4,7 +4,6 @@ use std::sync::Arc;
 use analyzer::{QueryEngine};
 use diagnostics::{DiagnosticsContext, ToDiagnostics, format_rustc};
 use files::FileId;
-use indexing::{TermItemId, TypeItemId};
 use smol_str::SmolStr;
 
 macro_rules! pos {
@@ -201,6 +200,27 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
         }))
     };
 
+    let map_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let f = args[0].clone();
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let m = args2[0].clone();
+                evaluating::apply(f.clone(), m)
+            })))
+        }))
+    };
+
+    let applicative_apply_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let f_wrapped = args[0].clone();
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let m = args2[0].clone();
+                // f_wrapped is already the function (result of map f m1)
+                evaluating::apply(f_wrapped.clone(), m)
+            })))
+        }))
+    };
+
     let log_output = Arc::clone(&output);
     let log_ffi = move || {
         let log_output = Arc::clone(&log_output);
@@ -225,41 +245,83 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
     env.locals.insert(SmolStr::new("bind"), bind_ffi());
     env.locals.insert(SmolStr::new("discard"), discard_ffi());
     env.locals.insert(SmolStr::new("pure"), pure_ffi());
+    env.locals.insert(SmolStr::new("map"), map_ffi());
+    env.locals.insert(SmolStr::new("apply"), applicative_apply_ffi());
 
-    // Pass 0: Register placeholders
+    // Pass 0: Register placeholders and FFIs
     for (item_id, term_item) in lowered.info.iter_term_item() {
-        let val = match term_item {
+        match term_item {
             lowering::TermItemIr::Constructor { .. } => {
-                evaluating::Value::Constructor {
+                let val = evaluating::Value::Constructor {
                     file_id: id,
                     term_id: item_id,
                     arguments: vec![],
-                }
+                };
+                env.modules.write().unwrap().insert((id, item_id), val);
             }
             lowering::TermItemIr::Instance { .. } => {
-                evaluating::Value::Object(Default::default())
+                let val = evaluating::Value::Object(Default::default());
+                env.modules.write().unwrap().insert((id, item_id), val);
             }
             lowering::TermItemIr::Foreign { .. } => {
                 if let Some(name) = &indexed.items[item_id].name {
-                    match name.as_str() {
-                        "eq" => eq_ffi(),
-                        "add" => add_ffi(),
-                        "sub" => sub_ffi(),
-                        "log" => log_ffi(),
-                        "bind" => bind_ffi(),
-                        "discard" => discard_ffi(),
-                        "pure" => pure_ffi(),
-                        _ => evaluating::Value::String(SmolStr::new("foreign_placeholder")),
+                    let ffi_val = match name.as_str() {
+                        "eq" => Some(eq_ffi()),
+                        "add" => Some(add_ffi()),
+                        "sub" => Some(sub_ffi()),
+                        "log" => Some(log_ffi()),
+                        "bind" => Some(bind_ffi()),
+                        "discard" => Some(discard_ffi()),
+                        "pure" => Some(pure_ffi()),
+                        "map" => Some(map_ffi()),
+                        "apply" => Some(applicative_apply_ffi()),
+                        _ => None,
+                    };
+                    if let Some(val) = ffi_val {
+                        env.modules.write().unwrap().insert((id, item_id), val);
+                    } else {
+                        env.modules.write().unwrap().insert((id, item_id), evaluating::Value::String(SmolStr::new("foreign_placeholder")));
                     }
-                } else {
-                    evaluating::Value::String(SmolStr::new("placeholder"))
+                }
+            }
+            lowering::TermItemIr::Operator { resolution, .. } => {
+                let mut registered = false;
+                if let Some((f_id, t_id)) = resolution {
+                    let target_indexed = if *f_id == id {
+                        &indexed
+                    } else {
+                        // For simplicity, we only handle operators in the same file for now in this test runner.
+                        &indexed
+                    };
+                    
+                    if let Some(alias_name) = &target_indexed.items[*t_id].name {
+                        let ffi_val = match alias_name.as_str() {
+                            "eq" => Some(eq_ffi()),
+                            "add" => Some(add_ffi()),
+                            "sub" => Some(sub_ffi()),
+                            "log" => Some(log_ffi()),
+                            "bind" => Some(bind_ffi()),
+                            "discard" => Some(discard_ffi()),
+                            "pure" => Some(pure_ffi()),
+                            "map" => Some(map_ffi()),
+                            "apply" => Some(applicative_apply_ffi()),
+                            _ => None,
+                        };
+                        if let Some(val) = ffi_val {
+                            env.modules.write().unwrap().insert((id, item_id), val);
+                            registered = true;
+                        }
+                    }
+                }
+                
+                if !registered {
+                    env.modules.write().unwrap().insert((id, item_id), evaluating::Value::String(SmolStr::new("operator_placeholder")));
                 }
             }
             _ => {
-                evaluating::Value::String(SmolStr::new("placeholder"))
+                env.modules.write().unwrap().insert((id, item_id), evaluating::Value::String(SmolStr::new("placeholder")));
             }
-        };
-        env.modules.write().unwrap().insert((id, item_id), val);
+        }
     }
 
     // Pass 1: Actual evaluation to fix recursive closures
@@ -269,7 +331,6 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
                 if let Some(decl) = elaborated.declarations.iter().find(|d| d.name() == name) {
                     if let corefn::Declaration::Value { expression, .. } = decl {
                         if let Ok(val) = evaluating::eval(expression, &env) {
-                            }
                             env.modules.write().unwrap().insert((id, item_id), val);
                         }
                     }
@@ -282,8 +343,9 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
     writeln!(out, "module {} (evaluated)", elaborated.name).unwrap();
 
     for decl in &elaborated.declarations {
-        if let corefn::Declaration::Value { name, expression } = decl {
-            if name == "test" || name == "main" {
+        let name = decl.name();
+        if name == "test" || name == "main" {
+            if let corefn::Declaration::Value { expression, .. } = decl {
                 match evaluating::eval(expression, &env) {
                     Ok(val) => {
                         let final_val = match val {

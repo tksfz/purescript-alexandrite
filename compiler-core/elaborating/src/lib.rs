@@ -383,22 +383,52 @@ where
             };
             Expr::Var(var)
         }
+        ExpressionKind::InfixChain { head, tail } => {
+            let mut current = elaborate_expression(ctx, (*head).or_else(|| {
+                None
+            })?)?;
+            for pair in tail.iter() {
+                let op = elaborate_expression(ctx, pair.tick.or_else(|| {
+                    None
+                })?)?;
+                let arg = elaborate_expression(ctx, pair.element.or_else(|| {
+                    None
+                })?)?;
+                current = Expr::App(Box::new(Expr::App(Box::new(op), Box::new(current))), Box::new(arg));
+            }
+            current
+        }
+        ExpressionKind::OperatorChain { head, tail } => {
+            let mut current = elaborate_expression(ctx, (*head).or_else(|| {
+                None
+            })?)?;
+            for pair in tail.iter() {
+                let op_id = pair.id.or_else(|| {
+                    None
+                })?;
+                let op_res = ctx.lowered.info.get_term_operator(op_id).or_else(|| {
+                     None
+                })?;
+                let op = Expr::Var(Var::Module(op_res.0, op_res.1));
+                let arg = elaborate_expression(ctx, pair.element.or_else(|| {
+                    None
+                })?)?;
+                current = Expr::App(Box::new(Expr::App(Box::new(op), Box::new(current))), Box::new(arg));
+            }
+            current
+        }
         ExpressionKind::Application { function, arguments } => {
             let mut current = elaborate_expression(ctx, (*function).or_else(|| {
                 None
             })?)?;
-            for (i, arg) in arguments.iter().enumerate() {
+            for arg in arguments.iter() {
                 match arg {
                     lowering::ExpressionArgument::Term(Some(term_id)) => {
-                        let arg_expr = elaborate_expression(ctx, *term_id).or_else(|| {
-                            None
-                        })?;
-                        current = Expr::App(Box::new(current), Box::new(arg_expr));
+                        if let Some(arg_expr) = elaborate_expression(ctx, *term_id) {
+                            current = Expr::App(Box::new(current), Box::new(arg_expr));
+                        }
                     }
-                    lowering::ExpressionArgument::Term(None) => {
-                    }
-                    lowering::ExpressionArgument::Type(_) => {
-                    }
+                    _ => {}
                 }
             }
             current
@@ -426,6 +456,12 @@ where
                 })?);
             }
             Expr::Let(all_bindings, Box::new(body))
+        }
+        ExpressionKind::OperatorName { resolution } => {
+            let (f, i) = (*resolution).or_else(|| {
+                None
+            })?;
+            Expr::Var(Var::Module(f, i))
         }
         ExpressionKind::Constructor { resolution } => {
             let (f, i) = (*resolution).or_else(|| {
@@ -549,9 +585,8 @@ where
         ExpressionKind::Do { bind, discard, statements } => {
             elaborate_do(ctx, bind, discard, statements)?
         }
-        ExpressionKind::Ado { .. } => {
-            // Ado is more complex, return placeholder for now.
-            Expr::Literal(Literal::String(SmolStr::new("unimplemented_ado")))
+        ExpressionKind::Ado { map, apply, pure, statements, expression } => {
+            elaborate_ado(ctx, map, apply, pure, statements, expression)?
         }
         _ => {
             return None;
@@ -646,6 +681,128 @@ where
             ))
         }
     }
+}
+
+fn elaborate_ado<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
+    map: &Option<lowering::TermVariableResolution>,
+    apply: &Option<lowering::TermVariableResolution>,
+    pure: &Option<lowering::TermVariableResolution>,
+    statements: &[lowering::DoStatementId],
+    expression: &Option<lowering::ExpressionId>,
+) -> Option<Expr>
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
+    if statements.is_empty() {
+        let pure_res = pure.as_ref().or_else(|| {
+             None
+        })?;
+        let pure_expr = Expr::Var(match pure_res {
+            lowering::TermVariableResolution::Reference(f, i) => Var::Module(*f, *i),
+            lowering::TermVariableResolution::Let(l_id) => Var::Local(indexed_name_for_let(ctx, *l_id)),
+            lowering::TermVariableResolution::Binder(b_id) => {
+                Var::Local(ctx.binder_names.get(b_id).cloned().unwrap_or_else(|| SmolStr::new("unknown_binder")))
+            }
+            _ => {
+                return None;
+            }
+        });
+        let e = elaborate_expression(ctx, (*expression).or_else(|| {
+             None
+        })?)?;
+        return Some(Expr::App(Box::new(pure_expr), Box::new(e)));
+    }
+
+    let mut binders = Vec::new();
+    let mut expressions = Vec::new();
+    let mut lets = Vec::new();
+
+    for (i, &stmt_id) in statements.iter().enumerate() {
+        let stmt = ctx.lowered.info.get_do_statement(stmt_id).or_else(|| {
+             None
+        })?;
+        match stmt {
+            lowering::DoStatement::Bind { binder, expression } => {
+                binders.push(elaborate_binder(ctx, (*binder).or_else(|| {
+                     None
+                })?)?);
+                expressions.push(elaborate_expression(ctx, (*expression).or_else(|| {
+                     None
+                })?)?);
+            }
+            lowering::DoStatement::Discard { expression } => {
+                binders.push(Binder::Wildcard);
+                expressions.push(elaborate_expression(ctx, (*expression).or_else(|| {
+                     None
+                })?)?);
+            }
+            lowering::DoStatement::Let { statements } => {
+                for chunk in statements.iter() {
+                    lets.extend(elaborate_let_binding_chunk(ctx, chunk)?);
+                }
+            }
+        }
+    }
+
+    let mut body = elaborate_expression(ctx, (*expression).or_else(|| {
+         None
+    })?)?;
+    if !lets.is_empty() {
+        body = Expr::Let(lets, Box::new(body));
+    }
+
+    for binder in binders.iter().rev() {
+        body = Expr::Abs(binder.clone(), Box::new(body));
+    }
+
+    let (first_expr, rest_exprs) = expressions.split_first().or_else(|| {
+         None
+    })?;
+
+    let map_res = map.as_ref().or_else(|| {
+         None
+    })?;
+    let map_expr = Expr::Var(match map_res {
+        lowering::TermVariableResolution::Reference(f, i) => Var::Module(*f, *i),
+        lowering::TermVariableResolution::Let(l_id) => Var::Local(indexed_name_for_let(ctx, *l_id)),
+        lowering::TermVariableResolution::Binder(b_id) => {
+            Var::Local(ctx.binder_names.get(b_id).cloned().unwrap_or_else(|| SmolStr::new("unknown_binder")))
+        }
+        _ => {
+             return None;
+        }
+    });
+
+    let mut current = Expr::App(
+        Box::new(Expr::App(Box::new(map_expr), Box::new(body))),
+        Box::new(first_expr.clone()),
+    );
+
+    if !rest_exprs.is_empty() {
+        let apply_res = apply.as_ref().or_else(|| {
+             None
+        })?;
+        let apply_expr = Expr::Var(match apply_res {
+            lowering::TermVariableResolution::Reference(f, i) => Var::Module(*f, *i),
+            lowering::TermVariableResolution::Let(l_id) => Var::Local(indexed_name_for_let(ctx, *l_id)),
+            lowering::TermVariableResolution::Binder(b_id) => {
+                Var::Local(ctx.binder_names.get(b_id).cloned().unwrap_or_else(|| SmolStr::new("unknown_binder")))
+            }
+            _ => {
+                 return None;
+            }
+        });
+
+        for (i, m) in rest_exprs.iter().enumerate() {
+            current = Expr::App(
+                Box::new(Expr::App(Box::new(apply_expr.clone()), Box::new(current))),
+                Box::new(m.clone()),
+            );
+        }
+    }
+
+    Some(current)
 }
 
 fn elaborate_binder<Q: QueryProxy>(

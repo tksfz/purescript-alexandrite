@@ -203,6 +203,7 @@ fn run_test(folder: &str, file: &str) {{
     for folder in read_dir(fixtures_path) {
         let Some(stem) = folder.file_stem() else { continue };
         let folder_name = stem.to_os_string().into_string().unwrap().to_snake_case();
+        eprintln!("Generating test for folder: {}", folder_name);
         writeln!(
             buffer,
             r#"
@@ -236,6 +237,7 @@ fn run_test(folder: &str, file: &str) {{
     for folder in read_dir(fixtures_path) {
         let Some(stem) = folder.file_stem() else { continue };
         let folder_name = stem.to_os_string().into_string().unwrap().to_snake_case();
+        eprintln!("Generating test for folder: {}", folder_name);
         writeln!(
             buffer,
             r#"
