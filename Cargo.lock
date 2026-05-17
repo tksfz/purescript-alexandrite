@@ -692,6 +692,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "evaluating"
+version = "0.1.0"
+dependencies = [
+ "building-types",
+ "corefn",
+ "files",
+ "indexing",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "smol_str",
+ "thiserror",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2534,6 +2549,7 @@ dependencies = [
  "checking",
  "corefn",
  "diagnostics",
+ "evaluating",
  "files",
  "glob",
  "heck",
@@ -2541,6 +2557,7 @@ dependencies = [
  "insta",
  "interner",
  "itertools 0.14.0",
+ "la-arena",
  "line-index",
  "lowering",
  "rowan",

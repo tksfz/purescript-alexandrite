@@ -25,11 +25,13 @@ fn main() {
     println!("cargo::rerun-if-env-changed=RESOLVING_FIXTURES_HASH");
     println!("cargo::rerun-if-env-changed=CHECKING_FIXTURES_HASH");
     println!("cargo::rerun-if-env-changed=ELABORATING_FIXTURES_HASH");
+    println!("cargo::rerun-if-env-changed=EVALUATING_FIXTURES_HASH");
     generate_lsp();
     generate_lowering();
     generate_resolving();
     generate_checking();
     generate_elaborating();
+    generate_evaluating();
 }
 
 fn generate_lsp() {
@@ -194,6 +196,39 @@ fn run_test(folder: &str, file: &str) {{
 }}"#).unwrap();
 
     let fixtures_path = Path::new("./fixtures/elaborating");
+    if !fixtures_path.exists() {
+        return;
+    }
+
+    for folder in read_dir(fixtures_path) {
+        let Some(stem) = folder.file_stem() else { continue };
+        let folder_name = stem.to_os_string().into_string().unwrap().to_snake_case();
+        writeln!(
+            buffer,
+            r#"
+#[rustfmt::skip] #[test] fn test_{folder_name}_main() {{ run_test("{folder_name}", "Main"); }}"#
+        )
+        .unwrap();
+    }
+}
+
+fn generate_evaluating() {
+    let mut buffer = generated_file("evaluating_generated.rs");
+    writeln!(buffer, r#"// Do not edit! See build.rs
+
+#[rustfmt::skip]
+fn run_test(folder: &str, file: &str) {{
+    let path = std::path::Path::new("fixtures/evaluating").join(folder);
+    let (engine, _) = tests_integration::load_compiler(&path);
+    let Some(id) = engine.module_file(file) else {{ return }};
+    let report = tests_integration::generated::basic::report_evaluated(&engine, id);
+    let mut settings = insta::Settings::clone_current();
+    settings.set_snapshot_path(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/evaluating").join(folder));
+    settings.set_prepend_module_to_snapshot(false);
+    settings.bind(|| insta::assert_snapshot!(file, report));
+}}"#).unwrap();
+
+    let fixtures_path = Path::new("./fixtures/evaluating");
     if !fixtures_path.exists() {
         return;
     }

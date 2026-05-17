@@ -28,6 +28,10 @@ coverage-html:
 @t *args="":
   cargo run -q -p compiler-scripts --release -- "$@"
 
+[doc("Run evaluating integration tests")]
+@ev *args="":
+  cargo run -q -p compiler-scripts --release -- evaluating {{args}}
+
 [doc("Run package-set benchmarks (e.g. just bench --bench checking_single_core)")]
 @bench *args="":
   cargo criterion -p tests-package-set "$@"
