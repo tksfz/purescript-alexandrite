@@ -480,7 +480,7 @@ where
         }
         ExpressionKind::Record { record } => {
             let mut fields = FxHashMap::default();
-            for (i, item) in record.iter().enumerate() {
+            for item in record.iter() {
                 match item {
                     lowering::ExpressionRecordItem::RecordField { name: Some(name), value: Some(value) } => {
                         fields.insert(name.clone(), elaborate_expression(ctx, *value).or_else(|| {
@@ -492,6 +492,24 @@ where
                 }
             }
             Expr::Literal(Literal::Object(fields))
+        }
+        ExpressionKind::RecordUpdate { record, updates } => {
+            let record_expr = elaborate_expression(ctx, (*record).or_else(|| {
+                None
+            })?)?;
+            let core_updates = updates.iter().map(|u| elaborate_record_update(ctx, u)).collect::<Option<Vec<_>>>()?;
+            Expr::RecordUpdate(Box::new(record_expr), core_updates)
+        }
+        ExpressionKind::RecordAccess { record, labels } => {
+            let mut current = elaborate_expression(ctx, (*record).or_else(|| {
+                None
+            })?)?;
+            if let Some(labels) = labels {
+                for label in labels.iter() {
+                    current = Expr::Accessor(label.clone(), Box::new(current));
+                }
+            }
+            current
         }
         ExpressionKind::IfThenElse { if_, then, else_ } => {
             let cond = elaborate_expression(ctx, (*if_).or_else(|| {
@@ -803,6 +821,25 @@ where
     }
 
     Some(current)
+}
+
+fn elaborate_record_update<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
+    update: &lowering::RecordUpdate,
+) -> Option<corefn::RecordUpdateItem>
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
+    match update {
+        lowering::RecordUpdate::Leaf { name, expression } => {
+            let expr = elaborate_expression(ctx, (*expression)?)?;
+            Some(corefn::RecordUpdateItem::Leaf(name.clone()?, expr))
+        }
+        lowering::RecordUpdate::Branch { name, updates } => {
+            let core_updates = updates.iter().map(|u| elaborate_record_update(ctx, u)).collect::<Option<Vec<_>>>()?;
+            Some(corefn::RecordUpdateItem::Branch(name.clone()?, core_updates))
+        }
+    }
 }
 
 fn elaborate_binder<Q: QueryProxy>(

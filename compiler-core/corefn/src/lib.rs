@@ -98,7 +98,13 @@ pub enum Expr {
     Case(Vec<Expr>, Vec<CaseAlternative>),
     Constructor(#[serde(with = "idx_serde")] FileId, #[serde(with = "idx_serde")] TermItemId),
     Accessor(SmolStr, Box<Expr>),
-    ObjectUpdate(Box<Expr>, FxHashMap<SmolStr, Expr>),
+    RecordUpdate(Box<Expr>, Vec<RecordUpdateItem>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecordUpdateItem {
+    Leaf(SmolStr, Expr),
+    Branch(SmolStr, Vec<RecordUpdateItem>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

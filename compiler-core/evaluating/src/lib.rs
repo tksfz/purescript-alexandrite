@@ -1,73 +1,55 @@
 use std::sync::{Arc, RwLock};
-use std::fmt;
-
-use corefn::{Expr, Var, Binder, Literal as AstLiteral};
+use corefn::{Expr, Var, Literal, Binder, Binding, CaseAlternative, CaseResult};
 use files::FileId;
 use indexing::{TermItemId};
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum EvalError {
-    #[error("Variable not found: {0}")]
-    VariableNotFound(SmolStr),
-    #[error("Module variable not found: {0:?}:{1:?}")]
-    ModuleVariableNotFound(FileId, TermItemId),
-    #[error("Not a function: {0}")]
-    NotAFunction(String),
-    #[error("Mismatched number of arguments in pattern matching")]
-    MismatchedArguments,
-    #[error("No case matched")]
-    NoCaseMatched,
-    #[error("FFI error: {0}")]
-    FfiError(String),
-}
-
-pub type EvalResult<T> = Result<T, EvalError>;
-
 #[derive(Clone)]
 pub enum Value {
     Int(i32),
-    Number(SmolStr),
     String(SmolStr),
     Char(char),
     Boolean(bool),
     Array(Vec<Value>),
     Object(FxHashMap<SmolStr, Value>),
-    Closure {
-        env: Environment,
-        binder: Binder,
-        body: Box<Expr>,
-    },
     Constructor {
         file_id: FileId,
         term_id: TermItemId,
         arguments: Vec<Value>,
     },
+    Closure {
+        env: Environment,
+        binder: Binder,
+        body: Box<Expr>,
+    },
     Foreign(Arc<dyn Fn(Vec<Value>) -> EvalResult<Value> + Send + Sync>),
 }
 
-impl fmt::Debug for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Debug for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Int(i) => write!(f, "{}", i),
-            Value::Number(n) => write!(f, "{}", n),
+            Value::Int(i) => write!(f, "{:?}", i),
             Value::String(s) => write!(f, "{:?}", s),
             Value::Char(c) => write!(f, "{:?}", c),
-            Value::Boolean(b) => write!(f, "{}", b),
+            Value::Boolean(b) => write!(f, "{:?}", b),
             Value::Array(a) => write!(f, "{:?}", a),
             Value::Object(o) => write!(f, "{:?}", o),
-            Value::Closure { .. } => write!(f, "<closure>"),
             Value::Constructor { file_id, term_id, arguments } => {
-                write!(f, "Constructor({:?}, {:?}, {:?})", file_id, term_id, arguments)
+                f.debug_struct("Constructor")
+                    .field("file_id", file_id)
+                    .field("term_id", term_id)
+                    .field("arguments", arguments)
+                    .finish()
             }
+            Value::Closure { .. } => write!(f, "<closure>"),
             Value::Foreign(_) => write!(f, "<foreign>"),
         }
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Environment {
     pub locals: FxHashMap<SmolStr, Value>,
     pub modules: Arc<RwLock<FxHashMap<(FileId, TermItemId), Value>>>,
@@ -75,44 +57,94 @@ pub struct Environment {
 
 impl Environment {
     pub fn new() -> Self {
-        Self {
-            locals: FxHashMap::default(),
-            modules: Arc::new(RwLock::new(FxHashMap::default())),
-        }
-    }
-
-    pub fn extend(&self, name: SmolStr, value: Value) -> Self {
-        let mut new_env = self.clone();
-        new_env.locals.insert(name, value);
-        new_env.locals.shrink_to_fit();
-        new_env
-    }
-
-    pub fn lookup_local(&self, name: &SmolStr) -> Option<Value> {
-        self.locals.get(name).cloned()
-    }
-
-    pub fn lookup_module(&self, file_id: FileId, term_id: TermItemId) -> Option<Value> {
-        self.modules.read().unwrap().get(&(file_id, term_id)).cloned()
+        Self::default()
     }
 }
 
-pub fn eval(expr: &Expr, env: &Environment) -> EvalResult<Value> {
+#[derive(Error, Debug)]
+pub enum EvalError {
+    #[error("Variable not found: {0}")]
+    VariableNotFound(SmolStr),
+    #[error("Module variable not found: {0:?}:{1:?}")]
+    ModuleVariableNotFound(FileId, TermItemId),
+    #[error("Not a function: {0}")]
+    NotAFunction(String),
+    #[error("FFI error: {0}")]
+    FFIError(String),
+}
+
+pub type EvalResult<T> = Result<T, EvalError>;
+
+fn apply_record_updates(
+    fields: &mut FxHashMap<SmolStr, Value>,
+    updates: &[corefn::RecordUpdateItem],
+    env: &Environment,
+) -> EvalResult<()> {
+    for update in updates {
+        match update {
+            corefn::RecordUpdateItem::Leaf(name, expression) => {
+                let val = eval(expression, env)?;
+                fields.insert(name.clone(), val);
+            }
+            corefn::RecordUpdateItem::Branch(name, sub_updates) => {
+                let val = fields.get_mut(name).ok_or_else(|| EvalError::VariableNotFound(name.clone()))?;
+                match val {
+                    Value::Object(sub_fields) => {
+                        apply_record_updates(sub_fields, sub_updates, env)?;
+                    }
+                    _ => return Err(EvalError::NotAFunction(format!("Expected object for nested update, found {:?}", val))),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn eval(
+    expr: &Expr,
+    env: &Environment,
+) -> EvalResult<Value> {
     match expr {
-        Expr::Literal(lit) => eval_literal(lit, env),
+        Expr::Literal(lit) => match lit {
+            Literal::Int(i) => Ok(Value::Int(*i)),
+            Literal::String(s) => Ok(Value::String(s.clone())),
+            Literal::Char(c) => Ok(Value::Char(*c)),
+            Literal::Boolean(b) => Ok(Value::Boolean(*b)),
+            Literal::Array(a) => {
+                let mut vals = Vec::new();
+                for e in a {
+                    vals.push(eval(e, env)?);
+                }
+                Ok(Value::Array(vals))
+            }
+            Literal::Object(o) => {
+                let mut fields = FxHashMap::default();
+                for (name, e) in o {
+                    fields.insert(name.clone(), eval(e, env)?);
+                }
+                Ok(Value::Object(fields))
+            }
+            _ => Err(EvalError::FFIError(format!("Unimplemented literal in eval: {:?}", lit))),
+        },
         Expr::Var(var) => match var {
-            Var::Local(name) => env.lookup_local(name)
+            Var::Local(name) => env
+                .locals
+                .get(name)
+                .cloned()
                 .ok_or_else(|| EvalError::VariableNotFound(name.clone())),
-            Var::Module(file_id, term_id) => env.lookup_module(*file_id, *term_id)
+            Var::Module(file_id, term_id) => env
+                .modules
+                .read()
+                .unwrap()
+                .get(&(*file_id, *term_id))
+                .cloned()
                 .ok_or_else(|| EvalError::ModuleVariableNotFound(*file_id, *term_id)),
         },
-        Expr::Abs(binder, body) => {
-            Ok(Value::Closure {
-                env: env.clone(),
-                binder: binder.clone(),
-                body: body.clone(),
-            })
-        }
+        Expr::Abs(binder, body) => Ok(Value::Closure {
+            env: env.clone(),
+            binder: binder.clone(),
+            body: body.clone(),
+        }),
         Expr::App(function, argument) => {
             let func_val = eval(function, env)?;
             let arg_val = eval(argument, env)?;
@@ -120,18 +152,14 @@ pub fn eval(expr: &Expr, env: &Environment) -> EvalResult<Value> {
         }
         Expr::Let(bindings, body) => {
             let mut current_env = env.clone();
-            
-            // Pass 0: Register dummy closures for all bindings to allow self-reference
             for binding in bindings {
                 let dummy = Value::Closure {
                     env: current_env.clone(),
-                    binder: corefn::Binder::Wildcard,
+                    binder: Binder::Wildcard,
                     body: Box::new(binding.expression.clone()),
                 };
                 current_env.locals.insert(binding.name.clone(), dummy);
             }
-
-            // Pass 1: Multiple evaluation passes to reach a fixed point for recursive bindings
             for _ in 0..5 {
                 for binding in bindings {
                     if let Ok(val) = eval(&binding.expression, &current_env) {
@@ -139,7 +167,6 @@ pub fn eval(expr: &Expr, env: &Environment) -> EvalResult<Value> {
                     }
                 }
             }
-            
             eval(body, &current_env)
         }
         Expr::Constructor(file_id, term_id) => {
@@ -159,128 +186,101 @@ pub fn eval(expr: &Expr, env: &Environment) -> EvalResult<Value> {
                 _ => Err(EvalError::NotAFunction(format!("Expected object, found {:?}", val))),
             }
         }
+        Expr::RecordUpdate(record, updates) => {
+            let val = eval(record, env)?;
+            match val {
+                Value::Object(fields) => {
+                    let mut new_fields = fields;
+                    apply_record_updates(&mut new_fields, updates, env)?;
+                    Ok(Value::Object(new_fields))
+                }
+                _ => Err(EvalError::NotAFunction(format!("Expected object, found {:?}", val))),
+            }
+        }
         Expr::Case(expressions, alternatives) => {
-             let vals = expressions.iter().map(|e| eval(e, env)).collect::<EvalResult<Vec<_>>>()?;
-             for alt in alternatives {
-                 if let Some(res_expr) = match_alternative(alt, &vals, env)? {
-                     return eval(res_expr, env);
-                 }
-             }
-             Err(EvalError::NoCaseMatched)
-        }
-        _ => Err(EvalError::FfiError(format!("Unimplemented expr in eval: {:?}", expr))),
-    }
-}
-
-fn eval_literal(lit: &AstLiteral, env: &Environment) -> EvalResult<Value> {
-    match lit {
-        AstLiteral::Int(i) => Ok(Value::Int(*i)),
-        AstLiteral::Number(n) => Ok(Value::Number(n.clone())),
-        AstLiteral::String(s) => Ok(Value::String(s.clone())),
-        AstLiteral::Char(c) => Ok(Value::Char(*c)),
-        AstLiteral::Boolean(b) => Ok(Value::Boolean(*b)),
-        AstLiteral::Array(a) => {
-            let mut vals = Vec::new();
-            for e in a {
-                vals.push(eval(e, env)?);
+            let vals = expressions.iter().map(|e| eval(e, env)).collect::<EvalResult<Vec<_>>>()?;
+            for alt in alternatives {
+                let mut case_env = env.clone();
+                if match_alternative_into(alt, &vals, &mut case_env)? {
+                    match &alt.result {
+                        CaseResult::Expression(res_expr) => return eval(res_expr, &case_env),
+                        _ => {}
+                    }
+                }
             }
-            Ok(Value::Array(vals))
-        }
-        AstLiteral::Object(o) => {
-            let mut fields = FxHashMap::default();
-            for (name, e) in o {
-                fields.insert(name.clone(), eval(e, env)?);
-            }
-            Ok(Value::Object(fields))
+            Err(EvalError::FFIError("No matching alternative in case".into()))
         }
     }
 }
 
-pub fn apply(function: Value, argument: Value) -> EvalResult<Value> {
+pub fn apply(
+    function: Value,
+    argument: Value,
+) -> EvalResult<Value> {
     match function {
         Value::Closure { env, binder, body } => {
             let mut new_env = env.clone();
             bind_pattern(&mut new_env, &binder, argument)?;
             eval(&body, &new_env)
         }
+        Value::Foreign(f) => f(vec![argument]),
         Value::Constructor { file_id, term_id, mut arguments } => {
             arguments.push(argument);
-            Ok(Value::Constructor { file_id, term_id, arguments })
-        }
-        Value::Foreign(f) => {
-            f(vec![argument])
+            Ok(Value::Constructor {
+                file_id,
+                term_id,
+                arguments,
+            })
         }
         _ => Err(EvalError::NotAFunction(format!("{:?}", function))),
     }
 }
 
-fn bind_pattern(env: &mut Environment, binder: &Binder, value: Value) -> EvalResult<()> {
-    match (binder, value) {
-        (Binder::Var(name), val) => {
-            env.locals.insert(name.clone(), val);
+fn bind_pattern(
+    env: &mut Environment,
+    binder: &Binder,
+    value: Value,
+) -> EvalResult<()> {
+    match binder {
+        Binder::Var(name) => {
+            env.locals.insert(name.clone(), value);
             Ok(())
         }
-        (Binder::Wildcard, _) => Ok(()),
-        (Binder::Literal(corefn::LiteralBinder::Boolean(b1)), Value::Boolean(b2)) if *b1 == b2 => Ok(()),
-        (Binder::Literal(corefn::LiteralBinder::Int(i1)), Value::Int(i2)) if *i1 == i2 => Ok(()),
-        (Binder::Constructor(f1, t1, binders), Value::Constructor { file_id: f2, term_id: t2, arguments }) if f1 == &f2 && t1 == &t2 => {
-            for (b, v) in binders.iter().zip(arguments) {
-                bind_pattern(env, b, v)?;
+        Binder::Wildcard => Ok(()),
+        Binder::Literal(lit) => match (lit, value) {
+            (corefn::LiteralBinder::Int(i1), Value::Int(i2)) if *i1 == i2 => Ok(()),
+            (corefn::LiteralBinder::Boolean(b1), Value::Boolean(b2)) if *b1 == b2 => Ok(()),
+            (corefn::LiteralBinder::String(s1), Value::String(s2)) if s1 == &s2 => Ok(()),
+            _ => Err(EvalError::FFIError("Pattern match failure".into())),
+        },
+        Binder::Constructor(f1, t1, binders) => match value {
+            Value::Constructor { file_id: f2, term_id: t2, arguments } if *f1 == f2 && *t1 == t2 => {
+                for (b, v) in binders.iter().zip(arguments.iter()) {
+                    bind_pattern(env, b, v.clone())?;
+                }
+                Ok(())
             }
-            Ok(())
-        }
-        _ => Err(EvalError::NoCaseMatched),
+            _ => Err(EvalError::FFIError(format!("Pattern match failure: expected constructor {:?}:{:?}, found {:?}", f1, t1, value))),
+        },
+        _ => Err(EvalError::FFIError(format!("Unimplemented binder in eval: {:?}", binder))),
     }
 }
 
-fn match_alternative<'a>(alt: &'a corefn::CaseAlternative, values: &[Value], env: &Environment) -> EvalResult<Option<&'a corefn::Expr>> {
+fn match_alternative_into(
+    alt: &CaseAlternative,
+    values: &[Value],
+    env: &mut Environment,
+) -> EvalResult<bool> {
     if alt.binders.len() != values.len() {
-        return Err(EvalError::MismatchedArguments);
+        return Ok(false);
     }
     
-    let mut current_env = env.clone();
-    for (binder, val) in alt.binders.iter().zip(values) {
-        if !match_binder(&mut current_env, binder, val)? {
-            return Ok(None);
+    for (binder, value) in alt.binders.iter().zip(values) {
+        if bind_pattern(env, binder, value.clone()).is_err() {
+            return Ok(false);
         }
     }
     
-    match &alt.result {
-        corefn::CaseResult::Expression(expr) => Ok(Some(expr)),
-        corefn::CaseResult::Guarded(guards) => {
-            for guard in guards {
-                if let Value::Boolean(true) = eval(&guard.condition, &current_env)? {
-                    return Ok(Some(&guard.result));
-                }
-            }
-            Ok(None)
-        }
-    }
+    Ok(true)
 }
 
-fn match_binder(env: &mut Environment, binder: &Binder, value: &Value) -> EvalResult<bool> {
-    match (binder, value) {
-        (Binder::Var(name), val) => {
-            env.locals.insert(name.clone(), val.clone());
-            Ok(true)
-        }
-        (Binder::Wildcard, _) => Ok(true),
-        (Binder::Literal(corefn::LiteralBinder::Boolean(b1)), Value::Boolean(b2)) => Ok(b1 == b2),
-        (Binder::Literal(corefn::LiteralBinder::Int(i1)), Value::Int(i2)) => Ok(i1 == i2),
-        (Binder::Constructor(f1, t1, binders), Value::Constructor { file_id: f2, term_id: t2, arguments }) => {
-            if f1 != f2 || t1 != t2 {
-                return Ok(false);
-            }
-            if binders.len() != arguments.len() {
-                return Ok(false);
-            }
-            for (b, v) in binders.iter().zip(arguments) {
-                if !match_binder(env, b, v)? {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
-        }
-        _ => Ok(false),
-    }
-}
