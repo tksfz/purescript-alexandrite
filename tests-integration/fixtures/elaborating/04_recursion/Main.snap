@@ -5,6 +5,118 @@ expression: report
 ---
 module Main
 
+value test =
+  {
+    "Literal": {
+      "Object": {
+        "res": {
+          "App": [
+            {
+              "Var": {
+                "Module": [
+                  9,
+                  5
+                ]
+              }
+            },
+            {
+              "Literal": {
+                "Int": 5
+              }
+            }
+          ]
+        },
+        "check": {
+          "App": [
+            {
+              "Var": {
+                "Module": [
+                  9,
+                  6
+                ]
+              }
+            },
+            {
+              "App": [
+                {
+                  "Constructor": [
+                    9,
+                    1
+                  ]
+                },
+                {
+                  "Literal": {
+                    "Int": 1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+
+value isJust =
+  {
+    "Abs": [
+      {
+        "Var": "m"
+      },
+      {
+        "Case": [
+          [
+            {
+              "Var": {
+                "Local": "m"
+              }
+            }
+          ],
+          [
+            {
+              "binders": [
+                {
+                  "Constructor": [
+                    9,
+                    1,
+                    [
+                      "Wildcard"
+                    ]
+                  ]
+                }
+              ],
+              "result": {
+                "Expression": {
+                  "Literal": {
+                    "Boolean": true
+                  }
+                }
+              }
+            },
+            {
+              "binders": [
+                {
+                  "Constructor": [
+                    9,
+                    0,
+                    []
+                  ]
+                }
+              ],
+              "result": {
+                "Expression": {
+                  "Literal": {
+                    "Boolean": false
+                  }
+                }
+              }
+            }
+          ]
+        ]
+      }
+    ]
+  }
+
 value fib =
   {
     "Abs": [
@@ -22,7 +134,7 @@ value fib =
                       "Var": {
                         "Module": [
                           9,
-                          3
+                          4
                         ]
                       }
                     },
@@ -78,7 +190,7 @@ value fib =
                                 "Var": {
                                   "Module": [
                                     9,
-                                    3
+                                    4
                                   ]
                                 }
                               },
@@ -131,7 +243,7 @@ value fib =
                                     "Var": {
                                       "Module": [
                                         9,
-                                        0
+                                        2
                                       ]
                                     }
                                   },
@@ -141,7 +253,7 @@ value fib =
                                         "Var": {
                                           "Module": [
                                             9,
-                                            2
+                                            5
                                           ]
                                         }
                                       },
@@ -153,7 +265,7 @@ value fib =
                                                 "Var": {
                                                   "Module": [
                                                     9,
-                                                    1
+                                                    3
                                                   ]
                                                 }
                                               },
@@ -181,7 +293,7 @@ value fib =
                                     "Var": {
                                       "Module": [
                                         9,
-                                        2
+                                        5
                                       ]
                                     }
                                   },
@@ -193,7 +305,7 @@ value fib =
                                             "Var": {
                                               "Module": [
                                                 9,
-                                                1
+                                                3
                                               ]
                                             }
                                           },
@@ -228,42 +340,6 @@ value fib =
     ]
   }
 
-value eq =
-  {
-    "Abs": [
-      {
-        "Var": "a"
-      },
-      {
-        "Abs": [
-          {
-            "Var": "b"
-          },
-          {
-            "Literal": {
-              "Boolean": true
-            }
-          }
-        ]
-      }
-    ]
-  }
-
-value test =
-  {
-    "App": [
-      {
-        "Var": {
-          "Module": [
-            9,
-            2
-          ]
-        }
-      },
-      {
-        "Literal": {
-          "Int": 5
-        }
-      }
-    ]
-  }
+data Maybe =
+  | Nothing []
+  | Just ["value0"]

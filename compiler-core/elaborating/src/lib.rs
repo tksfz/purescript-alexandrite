@@ -41,8 +41,7 @@ pub fn elaborate_module(
 
     let mut declarations = Vec::new();
 
-    for (id, _) in indexed.items.iter_terms() {
-        let Some(term_item) = lowered.info.get_term_item(id) else { continue };
+    for (id, term_item) in lowered.info.iter_term_item() {
         if let Some(name) = &indexed.items[id].name {
             match term_item {
                 TermItemIr::ValueGroup { equations, .. } => {
@@ -52,6 +51,37 @@ pub fn elaborate_module(
                             expression: expr,
                         });
                     }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Translate data types
+    for (id, type_item) in lowered.info.iter_type_item() {
+        if let Some(name) = &indexed.items[id].name {
+            match type_item {
+                lowering::TypeItemIr::DataGroup { .. } => {
+                    let mut core_constructors = Vec::new();
+                    for ctor_id in indexed.pairs.data_constructors(id) {
+                        if let Some(ctor_name) = &indexed.items[ctor_id].name {
+                            if let Some(TermItemIr::Constructor { arguments }) =
+                                lowered.info.get_term_item(ctor_id)
+                            {
+                                let fields = (0..arguments.len())
+                                    .map(|i| SmolStr::from(format!("value{}", i)))
+                                    .collect();
+                                core_constructors.push(corefn::Constructor {
+                                    name: ctor_name.clone(),
+                                    fields,
+                                });
+                            }
+                        }
+                    }
+                    declarations.push(Declaration::Data {
+                        name: name.clone(),
+                        constructors: core_constructors,
+                    });
                 }
                 _ => {}
             }
@@ -71,10 +101,47 @@ fn elaborate_value_group(
     ctx: &mut ElaborationContext,
     equations: &[lowering::Equation],
 ) -> Option<Expr> {
-    if let [equation] = equations {
-        return elaborate_equation(ctx, equation);
+    if equations.is_empty() {
+        return None;
     }
-    None
+
+    if equations.len() == 1 && equations[0].binders.is_empty() {
+        return elaborate_equation(ctx, &equations[0]);
+    }
+
+    let num_args = equations[0].binders.len();
+    let mut arg_names = Vec::new();
+    for i in 0..num_args {
+        arg_names.push(SmolStr::from(format!("arg{}", i)));
+    }
+
+    let mut alternatives = Vec::new();
+    for equation in equations {
+        let binders = equation.binders.iter().map(|&b_id| {
+            elaborate_binder(ctx, b_id)
+        }).collect::<Option<Vec<_>>>()?;
+        
+        let result = match &equation.guarded {
+            Some(lowering::GuardedExpression::Unconditional { where_expression }) => {
+                CaseResult::Expression(elaborate_expression(ctx, where_expression.as_ref()?.expression?)?)
+            }
+            _ => return None,
+        };
+        
+        alternatives.push(CaseAlternative {
+            binders,
+            result,
+        });
+    }
+
+    let trunk = arg_names.iter().map(|name| Expr::Var(Var::Local(name.clone()))).collect();
+    let mut body = Expr::Case(trunk, alternatives);
+
+    for name in arg_names.iter().rev() {
+        body = Expr::Abs(Binder::Var(name.clone()), Box::new(body));
+    }
+
+    Some(body)
 }
 
 fn elaborate_equation(
@@ -157,15 +224,6 @@ fn elaborate_expression(
     let mut expr = match kind {
         ExpressionKind::Integer { value } => {
              Expr::Literal(Literal::Int(value.unwrap_or(0)))
-        }
-        ExpressionKind::Number { value, .. } => {
-             Expr::Literal(Literal::Number(value.clone().unwrap_or_default()))
-        }
-        ExpressionKind::String { value, .. } => {
-             Expr::Literal(Literal::String(value.clone().unwrap_or_default()))
-        }
-        ExpressionKind::Char { value } => {
-             Expr::Literal(Literal::Char(value.unwrap_or('\0')))
         }
         ExpressionKind::Boolean { boolean } => Expr::Literal(Literal::Boolean(*boolean)),
         ExpressionKind::Variable { resolution } => {
@@ -306,6 +364,28 @@ fn elaborate_binder(
             Some(Binder::Var(name))
         }
         BinderKind::Wildcard => Some(Binder::Wildcard),
+        BinderKind::Constructor { resolution, arguments } => {
+            let (f, i) = (*resolution)?;
+            let core_args = arguments.iter().map(|&a_id| {
+                elaborate_binder(ctx, a_id)
+            }).collect::<Option<Vec<_>>>()?;
+            Some(Binder::Constructor(f, i, core_args))
+        }
+        BinderKind::Integer { value } => {
+            Some(Binder::Literal(corefn::LiteralBinder::Int(value.unwrap_or(0))))
+        }
+        BinderKind::Boolean { boolean } => {
+            Some(Binder::Literal(corefn::LiteralBinder::Boolean(*boolean)))
+        }
+        BinderKind::String { value, .. } => {
+            Some(Binder::Literal(corefn::LiteralBinder::String(value.clone().unwrap_or_default())))
+        }
+        BinderKind::Char { value } => {
+            Some(Binder::Literal(corefn::LiteralBinder::Char(value.unwrap_or('\0'))))
+        }
+        BinderKind::Parenthesized { parenthesized } => {
+            elaborate_binder(ctx, (*parenthesized)?)
+        }
         _ => None,
     }
 }

@@ -114,20 +114,14 @@ pub fn eval(expr: &Expr, env: &Environment) -> EvalResult<Value> {
             })
         }
         Expr::App(function, argument) => {
-            let func_val = eval(function, env).map_err(|e| {
-                EvalError::FfiError(format!("Failed to eval function in App: {} (expr: {:?})", e, function))
-            })?;
-            let arg_val = eval(argument, env).map_err(|e| {
-                EvalError::FfiError(format!("Failed to eval argument in App: {} (expr: {:?})", e, argument))
-            })?;
+            let func_val = eval(function, env)?;
+            let arg_val = eval(argument, env)?;
             apply(func_val, arg_val)
         }
         Expr::Let(bindings, body) => {
             let mut current_env = env.clone();
             for binding in bindings {
-                let val = eval(&binding.expression, &current_env).map_err(|e| {
-                    EvalError::FfiError(format!("Failed to eval let binding {}: {}", binding.name, e))
-                })?;
+                let val = eval(&binding.expression, &current_env)?;
                 current_env.locals.insert(binding.name.clone(), val);
             }
             eval(body, &current_env)
@@ -203,7 +197,13 @@ fn bind_pattern(env: &mut Environment, binder: &Binder, value: Value) -> EvalRes
         (Binder::Wildcard, _) => Ok(()),
         (Binder::Literal(corefn::LiteralBinder::Boolean(b1)), Value::Boolean(b2)) if *b1 == b2 => Ok(()),
         (Binder::Literal(corefn::LiteralBinder::Int(i1)), Value::Int(i2)) if *i1 == i2 => Ok(()),
-        _ => unimplemented!("pattern matching for binder {:?} and value {:?}", binder, ""),
+        (Binder::Constructor(f1, t1, binders), Value::Constructor { file_id: f2, term_id: t2, arguments }) if f1 == &f2 && t1 == &t2 => {
+            for (b, v) in binders.iter().zip(arguments) {
+                bind_pattern(env, b, v)?;
+            }
+            Ok(())
+        }
+        _ => Err(EvalError::NoCaseMatched),
     }
 }
 
@@ -241,6 +241,20 @@ fn match_binder(env: &mut Environment, binder: &Binder, value: &Value) -> EvalRe
         (Binder::Wildcard, _) => Ok(true),
         (Binder::Literal(corefn::LiteralBinder::Boolean(b1)), Value::Boolean(b2)) => Ok(b1 == b2),
         (Binder::Literal(corefn::LiteralBinder::Int(i1)), Value::Int(i2)) => Ok(i1 == i2),
+        (Binder::Constructor(f1, t1, binders), Value::Constructor { file_id: f2, term_id: t2, arguments }) => {
+            if f1 != f2 || t1 != t2 {
+                return Ok(false);
+            }
+            if binders.len() != arguments.len() {
+                return Ok(false);
+            }
+            for (b, v) in binders.iter().zip(arguments) {
+                if !match_binder(env, b, v)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }

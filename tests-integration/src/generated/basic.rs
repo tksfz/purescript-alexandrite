@@ -127,6 +127,9 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
                     (evaluating::Value::String(s1), evaluating::Value::String(s2)) => {
                         Ok(evaluating::Value::Boolean(s1 == s2))
                     }
+                    (evaluating::Value::Boolean(b1), evaluating::Value::Boolean(b2)) => {
+                        Ok(evaluating::Value::Boolean(b1 == b2))
+                    }
                     _ => Ok(evaluating::Value::Boolean(false)),
                 }
             })))
@@ -178,42 +181,63 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
         }))
     };
 
-    // Register FFIs for the current module's foreign imports
     let lowered = engine.lowered(id).unwrap();
     let indexed = engine.indexed(id).unwrap();
+
+    // Pass 0: Register FFIs, constructors, and dummy closures for ValueGroups
     for (item_id, term_item) in lowered.info.iter_term_item() {
-        if let lowering::TermItemIr::Foreign { .. } = term_item {
-            if let Some(name) = &indexed.items[item_id].name {
-                let ffi_val = match name.as_str() {
-                    "eq" => Some(eq_ffi()),
-                    "add" => Some(add_ffi()),
-                    "sub" => Some(sub_ffi()),
-                    "log" => Some(log_ffi()),
-                    _ => None,
-                };
-                if let Some(val) = ffi_val {
+        if let Some(name) = &indexed.items[item_id].name {
+            match term_item {
+                lowering::TermItemIr::Foreign { .. } => {
+                    let ffi_val = match name.as_str() {
+                        "eq" => Some(eq_ffi()),
+                        "add" => Some(add_ffi()),
+                        "sub" => Some(sub_ffi()),
+                        "log" => Some(log_ffi()),
+                        _ => None,
+                    };
+                    if let Some(val) = ffi_val {
+                        env.modules.write().unwrap().insert((id, item_id), val);
+                    }
+                }
+                lowering::TermItemIr::ValueGroup { .. } => {
+                    if let Some(decl) = elaborated.declarations.iter().find(|d| d.name() == name) {
+                        if let corefn::Declaration::Value { expression, .. } = decl {
+                            let val = evaluating::Value::Closure {
+                                env: env.clone(),
+                                binder: corefn::Binder::Wildcard,
+                                body: Box::new(expression.clone()),
+                            };
+                            env.modules.write().unwrap().insert((id, item_id), val);
+                        }
+                    }
+                }
+                lowering::TermItemIr::Constructor { .. } => {
+                    let val = evaluating::Value::Constructor {
+                        file_id: id,
+                        term_id: item_id,
+                        arguments: vec![],
+                    };
                     env.modules.write().unwrap().insert((id, item_id), val);
                 }
+                _ => {}
             }
         }
     }
 
-    // Also register in locals for easy access if not imported but defined as lambda
+    // Register FFIs in locals
     env.locals.insert(SmolStr::new("eq"), eq_ffi());
     env.locals.insert(SmolStr::new("add"), add_ffi());
     env.locals.insert(SmolStr::new("sub"), sub_ffi());
     env.locals.insert(SmolStr::new("log"), log_ffi());
 
-    // Populate module environment with current module values to support recursion
-    for _ in 0..3 {
-        for (item_id, _) in indexed.items.iter_terms() {
-            if let Some(name) = &indexed.items[item_id].name {
-                if let Some(decl) = elaborated.declarations.iter().find(|d| match d {
-                    corefn::Declaration::Value { name: d_name, .. } => d_name == name,
-                    _ => false,
-                }) {
-                    if let corefn::Declaration::Value { expression, .. } = decl {
-                        if !env.modules.read().unwrap().contains_key(&(id, item_id)) {
+    // Pass 1: Recursive evaluation to replace dummies with actual closures
+    for _ in 0..10 {
+        for (item_id, term_item) in lowered.info.iter_term_item() {
+            if let lowering::TermItemIr::ValueGroup { .. } = term_item {
+                if let Some(name) = &indexed.items[item_id].name {
+                    if let Some(decl) = elaborated.declarations.iter().find(|d| d.name() == name) {
+                        if let corefn::Declaration::Value { expression, .. } = decl {
                             if let Ok(val) = evaluating::eval(expression, &env) {
                                 env.modules.write().unwrap().insert((id, item_id), val);
                             }
@@ -232,7 +256,6 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
             if name == "test" || name == "main" {
                 match evaluating::eval(expression, &env) {
                     Ok(val) => {
-                        // If it's an Effect, run it once by applying to unit
                         let final_val = match val {
                             evaluating::Value::Closure { .. } | evaluating::Value::Foreign(_) => {
                                 evaluating::apply(val.clone(), evaluating::Value::Object(Default::default()))

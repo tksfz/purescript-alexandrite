@@ -1,15 +1,22 @@
 module Main where
 
--- Use our FFI add/sub for recursion
+data Maybe a = Nothing | Just a
+
 foreign import add :: Int -> Int -> Int
 foreign import sub :: Int -> Int -> Int
+foreign import eq :: Int -> Int -> Boolean
 
 fib = \n -> 
   if eq n 0 then 0
   else if eq n 1 then 1
   else add (fib (sub n 1)) (fib (sub n 2))
 
--- dummy eq for now as it's hardwired in our FFI
-eq = \a -> \b -> true -- This won't work for recursion logic, let's add a proper eq FFI
+-- Test ADT construction and matching
+isJust = \m -> case m of
+  Just _ -> true
+  Nothing -> false
 
-test = fib 5
+test = {
+  res: fib 5,
+  check: isJust (Just 1)
+}

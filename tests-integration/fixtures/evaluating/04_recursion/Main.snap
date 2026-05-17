@@ -5,4 +5,4 @@ expression: report
 ---
 module Main (evaluated)
 
-value test = 5
+value test = {"res": 5, "check": true}

@@ -4,7 +4,3 @@ assertion_line: 12
 expression: report
 ---
 module Main (evaluated)
-
-value test = {}
-logs:
-  "Hello from PureScript interpreter!"

@@ -73,6 +73,15 @@ pub enum Declaration {
     },
 }
 
+impl Declaration {
+    pub fn name(&self) -> &SmolStr {
+        match self {
+            Declaration::Value { name, .. } => name,
+            Declaration::Data { name, .. } => name,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Constructor {
     pub name: SmolStr,
