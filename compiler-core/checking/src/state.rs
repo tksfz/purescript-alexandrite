@@ -285,8 +285,8 @@ impl CheckState {
         self.implications.current_mut().wanted.push_back(constraint);
     }
 
-    pub fn push_given(&mut self, constraint: TypeId) {
-        self.implications.current_mut().given.push(constraint);
+    pub fn push_given(&mut self, constraint: TypeId, source: Option<lowering::TypeId>) {
+        self.implications.current_mut().given.push((constraint, source));
     }
 
     pub fn with_implication<T>(&mut self, f: impl FnOnce(&mut CheckState) -> T) -> T {

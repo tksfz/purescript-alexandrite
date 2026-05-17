@@ -67,6 +67,14 @@ pub struct CheckedModule {
     pub names: FxHashMap<Name, SmolStrId>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Evidence {
+    Instance(InstanceId, Vec<Evidence>),
+    Given(lowering::TypeId),
+    Superclass(Box<Evidence>, usize),
+    Compiler,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct CheckedNodes {
     pub types: FxHashMap<lowering::TypeId, TypeId>,
@@ -77,6 +85,7 @@ pub struct CheckedNodes {
     pub sections: FxHashMap<lowering::ExpressionId, TypeId>,
     pub term_operator: FxHashMap<lowering::TermOperatorId, OperatorBranchTypes>,
     pub type_operator: FxHashMap<lowering::TypeOperatorId, OperatorBranchTypes>,
+    pub evidence: FxHashMap<lowering::ExpressionId, Evidence>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

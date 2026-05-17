@@ -33,7 +33,7 @@ where
     Q: ExternalQueries,
 {
     for &constraint in &result.constraints {
-        state.push_given(constraint);
+        state.push_given(constraint, None);
     }
 
     match result.strategy {
@@ -117,6 +117,6 @@ fn generate_delegate_constraint<Q>(
     let given_constraint = context.intern_application(class_type, skolem_type);
     let wanted_constraint = context.intern_application(class_type, applied_type);
 
-    state.push_given(given_constraint);
+    state.push_given(given_constraint, None);
     state.push_wanted(wanted_constraint);
 }

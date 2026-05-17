@@ -544,7 +544,7 @@ where
         id = normalise::expand(state, context, id)?;
         match context.lookup_type(id) {
             Type::Constrained(constraint, constrained) => {
-                state.push_given(constraint);
+                state.push_given(constraint, None);
                 id = constrained;
             }
             _ => return Ok(id),

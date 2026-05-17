@@ -40,14 +40,15 @@ where
     Q: ExternalQueries,
 {
     let implication = state.implications.current();
-    solve_implication_id(state, context, implication, &[])
+    let inherited: &[(TypeId, Option<lowering::TypeId>)] = &[];
+    solve_implication_id(state, context, implication, inherited)
 }
 
 pub fn solve_implication_id<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
     implication: ImplicationId,
-    inherited: &[TypeId],
+    inherited: &[(TypeId, Option<lowering::TypeId>)],
 ) -> QueryResult<Vec<CanonicalConstraintId>>
 where
     Q: ExternalQueries,
@@ -79,7 +80,7 @@ where
     }
 
     let residual = solve_constraints(state, context, wanted, &inherited_given)?;
-    let elide_missing_patterns = inherited_given.contains(&context.prim.partial);
+    let elide_missing_patterns = inherited_given.iter().any(|(id, _)| *id == context.prim.partial);
 
     if !elide_missing_patterns {
         for Patterns { patterns, crumbs } in patterns {
@@ -142,14 +143,18 @@ pub fn solve_constraints<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
     wanted: VecDeque<CanonicalConstraintId>,
-    given: &[TypeId],
+    given: &[(TypeId, Option<lowering::TypeId>)],
 ) -> QueryResult<Vec<CanonicalConstraintId>>
 where
     Q: ExternalQueries,
 {
     let given = given
         .iter()
-        .filter_map(|id| canonical::canonicalise(state, context, *id).transpose())
+        .filter_map(|(id, source)| {
+            canonical::canonicalise(state, context, *id)
+                .transpose()
+                .map(|res| res.map(|id| elaborate::ElaboratedGivenId { id, source: *source }))
+        })
         .collect::<QueryResult<Vec<_>>>()?;
 
     let elaborate::ElaboratedGiven { given, substitution } =

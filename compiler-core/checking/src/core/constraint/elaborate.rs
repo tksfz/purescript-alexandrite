@@ -18,8 +18,14 @@ use crate::core::{CheckedClass, KindOrType, Name, Type, TypeId, normalise, toolk
 use crate::state::CheckState;
 use crate::{ExternalQueries, safe_loop};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ElaboratedGivenId {
+    pub id: CanonicalConstraintId,
+    pub source: Option<lowering::TypeId>,
+}
+
 pub struct ElaboratedGiven {
-    pub given: Vec<CanonicalConstraintId>,
+    pub given: Vec<ElaboratedGivenId>,
     pub substitution: NameToType,
 }
 
@@ -27,7 +33,7 @@ pub struct ElaboratedGiven {
 pub fn elaborate_given<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
-    given: &[CanonicalConstraintId],
+    given: &[ElaboratedGivenId],
 ) -> QueryResult<ElaboratedGiven>
 where
     Q: ExternalQueries,
@@ -42,8 +48,8 @@ where
 pub fn elaborate_superclasses<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
-    given: &[CanonicalConstraintId],
-) -> QueryResult<Vec<CanonicalConstraintId>>
+    given: &[ElaboratedGivenId],
+) -> QueryResult<Vec<ElaboratedGivenId>>
 where
     Q: ExternalQueries,
 {
@@ -52,7 +58,7 @@ where
     let mut seen = FxHashSet::default();
 
     for &given in given {
-        if seen.insert(given) {
+        if seen.insert(given.id) {
             elaborated.push(given);
             pending.push_back(given);
         }
@@ -75,15 +81,15 @@ where
 fn elaborate_via_superclass<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
-    constraint: CanonicalConstraintId,
-    constraints: &mut Vec<CanonicalConstraintId>,
-    pending: &mut VecDeque<CanonicalConstraintId>,
+    constraint: ElaboratedGivenId,
+    constraints: &mut Vec<ElaboratedGivenId>,
+    pending: &mut VecDeque<ElaboratedGivenId>,
     seen: &mut FxHashSet<CanonicalConstraintId>,
 ) -> QueryResult<()>
 where
     Q: ExternalQueries,
 {
-    let CanonicalConstraint { file_id, type_id, .. } = state.canonicals[constraint];
+    let CanonicalConstraint { file_id, type_id, .. } = state.canonicals[constraint.id];
     let Some(class) = toolkit::lookup_file_class(state, context, file_id, type_id)? else {
         return Ok(());
     };
@@ -92,7 +98,7 @@ where
         return Ok(());
     }
 
-    let CanonicalConstraint { arguments, .. } = &state.canonicals[constraint];
+    let CanonicalConstraint { arguments, .. } = &state.canonicals[constraint.id];
     let Some(substitutions) = superclass_substitutions(context, &class, arguments)? else {
         return Ok(());
     };
@@ -102,8 +108,9 @@ where
         if let Some(superclass) = canonical::canonicalise(state, context, superclass)?
             && seen.insert(superclass)
         {
-            constraints.push(superclass);
-            pending.push_back(superclass);
+            let superclass_id = ElaboratedGivenId { id: superclass, source: constraint.source };
+            constraints.push(superclass_id);
+            pending.push_back(superclass_id);
         }
     }
 
@@ -148,13 +155,13 @@ where
 pub fn elaborate_coercible<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
-    mut given: Vec<CanonicalConstraintId>,
-) -> Vec<CanonicalConstraintId>
+    mut given: Vec<ElaboratedGivenId>,
+) -> Vec<ElaboratedGivenId>
 where
     Q: ExternalQueries,
 {
     let symmetric = given.iter().filter_map(|given| {
-        let CanonicalConstraint { file_id, type_id, ref arguments } = state.canonicals[*given];
+        let CanonicalConstraint { file_id, type_id, ref arguments } = state.canonicals[given.id];
 
         if (file_id, type_id) != (context.prim_coerce.file_id, context.prim_coerce.coercible) {
             return None;
@@ -167,7 +174,8 @@ where
         };
 
         let arguments = [kind, right, left].into();
-        Some(state.canonicals.intern(CanonicalConstraint { file_id, type_id, arguments }))
+        let id = state.canonicals.intern(CanonicalConstraint { file_id, type_id, arguments });
+        Some(ElaboratedGivenId { id, source: given.source })
     });
 
     let symmetric = symmetric.collect_vec();
@@ -179,8 +187,8 @@ where
 fn extract_compiler_solved<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
-    given: Vec<CanonicalConstraintId>,
-) -> QueryResult<(Vec<CanonicalConstraintId>, NameToType)>
+    given: Vec<ElaboratedGivenId>,
+) -> QueryResult<(Vec<ElaboratedGivenId>, NameToType)>
 where
     Q: ExternalQueries,
 {
@@ -188,11 +196,16 @@ where
     let mut conflicts = FxHashSet::default();
 
     safe_loop! {
-        let given = canonical::substitute_canonicals(state, context, &substitution, &given)?;
+        let given_ids = given.iter().map(|g| g.id).collect_vec();
+        let substituted_ids = canonical::substitute_canonicals(state, context, &substitution, &given_ids)?;
+        let given_substituted = iter::zip(&given, substituted_ids)
+            .map(|(g, id)| ElaboratedGivenId { id, source: g.source })
+            .collect_vec();
+
         let mut changed = false;
 
-        for &constraint in &given {
-            let Some(matched) = compiler::match_compiler_instance(state, context, constraint, &given)?
+        for &constraint in &given_substituted {
+            let Some(matched) = compiler::match_compiler_instance(state, context, constraint.id, &substituted_ids)?
             else {
                 continue;
             };
@@ -219,7 +232,7 @@ where
         }
 
         if !changed {
-            return Ok((given, substitution));
+            return Ok((given_substituted, substitution));
         }
     }
 }

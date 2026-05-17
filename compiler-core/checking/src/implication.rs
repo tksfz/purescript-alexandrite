@@ -19,7 +19,7 @@ pub type ImplicationId = u32;
 /// A node in the implication tree.
 #[derive(Default)]
 pub struct Implication {
-    pub given: Vec<TypeId>,
+    pub given: Vec<(TypeId, Option<lowering::TypeId>)>,
     pub wanted: VecDeque<TypeId>,
     pub patterns: Vec<Patterns>,
     pub children: Vec<ImplicationId>,

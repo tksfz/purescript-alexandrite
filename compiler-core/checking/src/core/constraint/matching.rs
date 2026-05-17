@@ -55,19 +55,26 @@ impl MatchType {
 pub struct InstanceMatch {
     pub unifications: Vec<(TypeId, TypeId)>,
     pub constraints: Vec<CanonicalConstraintId>,
+    pub evidence: crate::Evidence,
 }
 
 impl InstanceMatch {
     pub fn empty() -> InstanceMatch {
-        InstanceMatch { unifications: vec![], constraints: vec![] }
+        InstanceMatch {
+            unifications: vec![],
+            constraints: vec![],
+            evidence: crate::Evidence::Given(lowering::TypeId::from_raw(la_arena::RawIdx::from_u32(
+                0,
+            ))), // Placeholder
+        }
     }
 
-    pub fn from_unifications(unifications: Vec<(TypeId, TypeId)>) -> InstanceMatch {
-        InstanceMatch { unifications, constraints: vec![] }
+    pub fn from_unifications(unifications: Vec<(TypeId, TypeId)>, evidence: crate::Evidence) -> InstanceMatch {
+        InstanceMatch { unifications, constraints: vec![], evidence }
     }
 
-    pub fn from_constraints(constraints: Vec<CanonicalConstraintId>) -> InstanceMatch {
-        InstanceMatch { unifications: vec![], constraints }
+    pub fn from_constraints(constraints: Vec<CanonicalConstraintId>, evidence: crate::Evidence) -> InstanceMatch {
+        InstanceMatch { unifications: vec![], constraints, evidence }
     }
 }
 
@@ -187,21 +194,23 @@ pub fn match_given_instance<Q>(
     state: &mut CheckState,
     context: &CheckContext<Q>,
     wanted: CanonicalConstraintId,
-    given: &[CanonicalConstraintId],
+    given: &[crate::core::constraint::elaborate::ElaboratedGivenId],
 ) -> QueryResult<MatchInstance>
 where
     Q: ExternalQueries,
 {
-    let wanted = state.canonicals[wanted].clone();
+    let wanted_canonical = state.canonicals[wanted].clone();
 
-    'given: for &given in given {
-        let given = state.canonicals[given].clone();
+    'given: for given_elaborated in given {
+        let given_canonical = state.canonicals[given_elaborated.id].clone();
 
-        if (wanted.file_id, wanted.type_id) != (given.file_id, given.type_id) {
+        if (wanted_canonical.file_id, wanted_canonical.type_id)
+            != (given_canonical.file_id, given_canonical.type_id)
+        {
             continue;
         }
 
-        if wanted.arguments.len() != given.arguments.len() {
+        if wanted_canonical.arguments.len() != given_canonical.arguments.len() {
             continue;
         }
 
@@ -209,7 +218,7 @@ where
         let mut stuck = vec![];
 
         for (&wanted_argument, &given_argument) in
-            iter::zip(wanted.arguments.iter(), given.arguments.iter())
+            iter::zip(wanted_canonical.arguments.iter(), given_canonical.arguments.iter())
         {
             let match_result =
                 if let (KindOrType::Kind(wanted_argument), KindOrType::Kind(given_argument))
@@ -238,7 +247,12 @@ where
 
         let match_results = results.iter().map(|(_, _, result)| *result).collect_vec();
 
-        if !can_determine_stuck(context, wanted.file_id, wanted.type_id, &match_results)? {
+        if !can_determine_stuck(
+            context,
+            wanted_canonical.file_id,
+            wanted_canonical.type_id,
+            &match_results,
+        )? {
             return Ok(MatchInstance::Stuck(stuck));
         }
 
@@ -250,7 +264,17 @@ where
             }
         }
 
-        return Ok(MatchInstance::Match(InstanceMatch::from_unifications(unifications)));
+        let evidence = if let Some(source) = given_elaborated.source {
+            crate::Evidence::Given(source)
+        } else {
+            // This happens for superclasses where the source is the original given
+            crate::Evidence::Compiler // Placeholder, should ideally be Superclass
+        };
+
+        return Ok(MatchInstance::Match(InstanceMatch::from_unifications(
+            unifications,
+            evidence,
+        )));
     }
 
     Ok(MatchInstance::Apart)
@@ -415,7 +439,18 @@ where
             };
         }
 
-        return Ok(MatchInstance::Match(InstanceMatch { unifications, constraints }));
+        let evidence = if let Some(instance_id) = candidate.instance_id {
+            // We'll need a way to collect sub-evidence, but for now we mark the instance
+            crate::Evidence::Instance(instance_id, vec![])
+        } else {
+            crate::Evidence::Compiler
+        };
+
+        return Ok(MatchInstance::Match(InstanceMatch {
+            unifications,
+            constraints,
+            evidence,
+        }));
     }
 
     Ok(MatchInstance::Apart)

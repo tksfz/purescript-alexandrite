@@ -19,6 +19,8 @@ use crate::{CheckedModule, ExternalQueries};
 pub struct InstanceCandidate {
     /// The syntactic ID for the instance chain.
     pub id: Option<InstanceChainId>,
+    /// The ID of the instance itself.
+    pub instance_id: Option<indexing::InstanceId>,
     /// The position of the instance in the chain.
     pub position: u32,
     /// Type information about the instance.
@@ -115,6 +117,7 @@ fn collect_instances_from_checked(
             .filter(|(_, instance)| instance.resolution == (class_file, class_id))
             .map(|(&id, &instance)| InstanceCandidate {
                 id: indexed.pairs.instance_chain_id(id),
+                instance_id: Some(id),
                 position: indexed.pairs.instance_chain_position(id).unwrap_or(0),
                 instance,
             }),
@@ -125,7 +128,12 @@ fn collect_instances_from_checked(
             .derived
             .values()
             .filter(|instance| instance.resolution == (class_file, class_id))
-            .map(|&instance| InstanceCandidate { id: None, position: 0, instance }),
+            .map(|&instance| InstanceCandidate {
+                id: None,
+                instance_id: None,
+                position: 0,
+                instance,
+            }),
     );
 }
 
