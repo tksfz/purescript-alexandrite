@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::fmt;
 
 use corefn::{Expr, Var, Binder, Literal as AstLiteral};
@@ -70,12 +70,15 @@ impl fmt::Debug for Value {
 #[derive(Clone, Default)]
 pub struct Environment {
     pub locals: FxHashMap<SmolStr, Value>,
-    pub modules: FxHashMap<(FileId, TermItemId), Value>,
+    pub modules: Arc<RwLock<FxHashMap<(FileId, TermItemId), Value>>>,
 }
 
 impl Environment {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            locals: FxHashMap::default(),
+            modules: Arc::new(RwLock::new(FxHashMap::default())),
+        }
     }
 
     pub fn extend(&self, name: SmolStr, value: Value) -> Self {
@@ -90,7 +93,7 @@ impl Environment {
     }
 
     pub fn lookup_module(&self, file_id: FileId, term_id: TermItemId) -> Option<Value> {
-        self.modules.get(&(file_id, term_id)).cloned()
+        self.modules.read().unwrap().get(&(file_id, term_id)).cloned()
     }
 }
 
@@ -111,15 +114,20 @@ pub fn eval(expr: &Expr, env: &Environment) -> EvalResult<Value> {
             })
         }
         Expr::App(function, argument) => {
-            let func_val = eval(function, env)?;
-            let arg_val = eval(argument, env)?;
+            let func_val = eval(function, env).map_err(|e| {
+                EvalError::FfiError(format!("Failed to eval function in App: {} (expr: {:?})", e, function))
+            })?;
+            let arg_val = eval(argument, env).map_err(|e| {
+                EvalError::FfiError(format!("Failed to eval argument in App: {} (expr: {:?})", e, argument))
+            })?;
             apply(func_val, arg_val)
         }
         Expr::Let(bindings, body) => {
             let mut current_env = env.clone();
-            // TODO: recursive let?
             for binding in bindings {
-                let val = eval(&binding.expression, &current_env)?;
+                let val = eval(&binding.expression, &current_env).map_err(|e| {
+                    EvalError::FfiError(format!("Failed to eval let binding {}: {}", binding.name, e))
+                })?;
                 current_env.locals.insert(binding.name.clone(), val);
             }
             eval(body, &current_env)
@@ -131,7 +139,16 @@ pub fn eval(expr: &Expr, env: &Environment) -> EvalResult<Value> {
                 arguments: vec![],
             })
         }
-        _ => unimplemented!("eval for {:?}", expr),
+        Expr::Case(expressions, alternatives) => {
+             let vals = expressions.iter().map(|e| eval(e, env)).collect::<EvalResult<Vec<_>>>()?;
+             for alt in alternatives {
+                 if let Some(res_expr) = match_alternative(alt, &vals, env)? {
+                     return eval(res_expr, env);
+                 }
+             }
+             Err(EvalError::NoCaseMatched)
+        }
+        _ => Err(EvalError::FfiError(format!("Unimplemented expr in eval: {:?}", expr))),
     }
 }
 
@@ -159,7 +176,7 @@ fn eval_literal(lit: &AstLiteral, env: &Environment) -> EvalResult<Value> {
     }
 }
 
-fn apply(function: Value, argument: Value) -> EvalResult<Value> {
+pub fn apply(function: Value, argument: Value) -> EvalResult<Value> {
     match function {
         Value::Closure { env, binder, body } => {
             let mut new_env = env.clone();
@@ -171,7 +188,6 @@ fn apply(function: Value, argument: Value) -> EvalResult<Value> {
             Ok(Value::Constructor { file_id, term_id, arguments })
         }
         Value::Foreign(f) => {
-            // We'll treat all FFI functions as unary and they can return another Foreign if they need more arguments.
             f(vec![argument])
         }
         _ => Err(EvalError::NotAFunction(format!("{:?}", function))),
@@ -185,6 +201,46 @@ fn bind_pattern(env: &mut Environment, binder: &Binder, value: Value) -> EvalRes
             Ok(())
         }
         (Binder::Wildcard, _) => Ok(()),
-        _ => unimplemented!("pattern matching for binder {:?}", binder),
+        (Binder::Literal(corefn::LiteralBinder::Boolean(b1)), Value::Boolean(b2)) if *b1 == b2 => Ok(()),
+        (Binder::Literal(corefn::LiteralBinder::Int(i1)), Value::Int(i2)) if *i1 == i2 => Ok(()),
+        _ => unimplemented!("pattern matching for binder {:?} and value {:?}", binder, ""),
+    }
+}
+
+fn match_alternative<'a>(alt: &'a corefn::CaseAlternative, values: &[Value], env: &Environment) -> EvalResult<Option<&'a corefn::Expr>> {
+    if alt.binders.len() != values.len() {
+        return Err(EvalError::MismatchedArguments);
+    }
+    
+    let mut current_env = env.clone();
+    for (binder, val) in alt.binders.iter().zip(values) {
+        if !match_binder(&mut current_env, binder, val)? {
+            return Ok(None);
+        }
+    }
+    
+    match &alt.result {
+        corefn::CaseResult::Expression(expr) => Ok(Some(expr)),
+        corefn::CaseResult::Guarded(guards) => {
+            for guard in guards {
+                if let Value::Boolean(true) = eval(&guard.condition, &current_env)? {
+                    return Ok(Some(&guard.result));
+                }
+            }
+            Ok(None)
+        }
+    }
+}
+
+fn match_binder(env: &mut Environment, binder: &Binder, value: &Value) -> EvalResult<bool> {
+    match (binder, value) {
+        (Binder::Var(name), val) => {
+            env.locals.insert(name.clone(), val.clone());
+            Ok(true)
+        }
+        (Binder::Wildcard, _) => Ok(true),
+        (Binder::Literal(corefn::LiteralBinder::Boolean(b1)), Value::Boolean(b2)) => Ok(b1 == b2),
+        (Binder::Literal(corefn::LiteralBinder::Int(i1)), Value::Int(i2)) => Ok(i1 == i2),
+        _ => Ok(false),
     }
 }

@@ -22,6 +22,7 @@ la-arena = "0.3.1"
 line-index = "0.1.2"
 lowering = { version = "0.1.0", path = "../compiler-core/lowering" }
 rowan = "0.16.1"
+smol_str = "0.3.5"
 stabilizing = { version = "0.1.0", path = "../compiler-core/stabilizing" }
 sugar = { version = "0.1.0", path = "../compiler-core/sugar" }
 syntax = { version = "0.1.0", path = "../compiler-core/syntax" }

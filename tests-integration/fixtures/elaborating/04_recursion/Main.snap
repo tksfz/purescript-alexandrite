@@ -1,0 +1,269 @@
+---
+source: target/debug/build/tests-integration-d785e929c4a3c5a8/out/elaborating_generated.rs
+assertion_line: 12
+expression: report
+---
+module Main
+
+value fib =
+  {
+    "Abs": [
+      {
+        "Var": "n"
+      },
+      {
+        "Case": [
+          [
+            {
+              "App": [
+                {
+                  "App": [
+                    {
+                      "Var": {
+                        "Module": [
+                          9,
+                          3
+                        ]
+                      }
+                    },
+                    {
+                      "Var": {
+                        "Local": "n"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "Literal": {
+                    "Int": 0
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            {
+              "binders": [
+                {
+                  "Literal": {
+                    "Boolean": true
+                  }
+                }
+              ],
+              "result": {
+                "Expression": {
+                  "Literal": {
+                    "Int": 0
+                  }
+                }
+              }
+            },
+            {
+              "binders": [
+                {
+                  "Literal": {
+                    "Boolean": false
+                  }
+                }
+              ],
+              "result": {
+                "Expression": {
+                  "Case": [
+                    [
+                      {
+                        "App": [
+                          {
+                            "App": [
+                              {
+                                "Var": {
+                                  "Module": [
+                                    9,
+                                    3
+                                  ]
+                                }
+                              },
+                              {
+                                "Var": {
+                                  "Local": "n"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "Literal": {
+                              "Int": 1
+                            }
+                          }
+                        ]
+                      }
+                    ],
+                    [
+                      {
+                        "binders": [
+                          {
+                            "Literal": {
+                              "Boolean": true
+                            }
+                          }
+                        ],
+                        "result": {
+                          "Expression": {
+                            "Literal": {
+                              "Int": 1
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "binders": [
+                          {
+                            "Literal": {
+                              "Boolean": false
+                            }
+                          }
+                        ],
+                        "result": {
+                          "Expression": {
+                            "App": [
+                              {
+                                "App": [
+                                  {
+                                    "Var": {
+                                      "Module": [
+                                        9,
+                                        0
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "App": [
+                                      {
+                                        "Var": {
+                                          "Module": [
+                                            9,
+                                            2
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "App": [
+                                          {
+                                            "App": [
+                                              {
+                                                "Var": {
+                                                  "Module": [
+                                                    9,
+                                                    1
+                                                  ]
+                                                }
+                                              },
+                                              {
+                                                "Var": {
+                                                  "Local": "n"
+                                                }
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "Literal": {
+                                              "Int": 1
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "App": [
+                                  {
+                                    "Var": {
+                                      "Module": [
+                                        9,
+                                        2
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "App": [
+                                      {
+                                        "App": [
+                                          {
+                                            "Var": {
+                                              "Module": [
+                                                9,
+                                                1
+                                              ]
+                                            }
+                                          },
+                                          {
+                                            "Var": {
+                                              "Local": "n"
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "Literal": {
+                                          "Int": 2
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  ]
+                }
+              }
+            }
+          ]
+        ]
+      }
+    ]
+  }
+
+value eq =
+  {
+    "Abs": [
+      {
+        "Var": "a"
+      },
+      {
+        "Abs": [
+          {
+            "Var": "b"
+          },
+          {
+            "Literal": {
+              "Boolean": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+
+value test =
+  {
+    "App": [
+      {
+        "Var": {
+          "Module": [
+            9,
+            2
+          ]
+        }
+      },
+      {
+        "Literal": {
+          "Int": 5
+        }
+      }
+    ]
+  }

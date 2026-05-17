@@ -5,4 +5,4 @@ expression: report
 ---
 module Main (evaluated)
 
-value test = true
+value test = Error: FFI error: Failed to eval function in App: FFI error: Failed to eval function in App: Module variable not found: Idx::<File>(9):Idx::<TermItem>(0) (expr: Var(Module(Idx::<File>(9), Idx::<TermItem>(0)))) (expr: App(Var(Module(Idx::<File>(9), Idx::<TermItem>(0))), Literal(Int(1))))

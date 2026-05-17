@@ -1,18 +1,18 @@
 use building_types::{QueryResult};
 use checking::{CheckedModule, Evidence};
-use corefn::{CoreFnModule, Declaration, Expr, Var, Literal, Binder, Binding};
+use corefn::{CoreFnModule, Declaration, Expr, Var, Literal, Binder, Binding, CaseAlternative, CaseResult};
 use files::FileId;
-use indexing::{IndexedModule, TermItemId};
+use indexing::{IndexedModule};
 use lowering::{LoweredModule, ExpressionKind, TermItemIr, BinderKind, LetBindingChunk};
 use resolving::ResolvedModule;
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
 pub struct ElaborationContext<'a> {
-    file_id: FileId,
+    _file_id: FileId,
     lowered: &'a LoweredModule,
     checked: &'a CheckedModule,
-    indexed: &'a IndexedModule,
+    _indexed: &'a IndexedModule,
     binder_names: FxHashMap<lowering::BinderId, SmolStr>,
     let_names: FxHashMap<lowering::LetBindingNameGroupId, SmolStr>,
 }
@@ -25,23 +25,19 @@ pub fn elaborate_module(
     indexed: &IndexedModule,
 ) -> QueryResult<CoreFnModule> {
     let mut ctx = ElaborationContext {
-        file_id,
+        _file_id: file_id,
         lowered,
         checked,
-        indexed,
+        _indexed: indexed,
         binder_names: FxHashMap::default(),
         let_names: FxHashMap::default(),
     };
 
-    // Pre-populate names
     for (id, kind) in lowered.info.iter_binder() {
         if let BinderKind::Variable { variable: Some(name) } = kind {
             ctx.binder_names.insert(id, name.clone());
         }
     }
-    // Let names are more complex because they are in groups.
-    // We'll extract them as we encounter them or pre-scan.
-    // For now, let's pre-scan let binding groups if we can find their names.
 
     let mut declarations = Vec::new();
 
@@ -65,8 +61,8 @@ pub fn elaborate_module(
     Ok(CoreFnModule {
         file_id,
         name: indexed.name.clone().unwrap_or_else(|| SmolStr::new("Main")),
-        imports: vec![], // TODO
-        exports: vec![], // TODO
+        imports: vec![],
+        exports: vec![],
         declarations,
     })
 }
@@ -76,8 +72,7 @@ fn elaborate_value_group(
     equations: &[lowering::Equation],
 ) -> Option<Expr> {
     if let [equation] = equations {
-        let body = elaborate_equation(ctx, equation)?;
-        return Some(body);
+        return elaborate_equation(ctx, equation);
     }
     None
 }
@@ -149,8 +144,6 @@ fn indexed_name_for_let(ctx: &mut ElaborationContext, id: lowering::LetBindingNa
     if let Some(name) = ctx.let_names.get(&id) {
         return name.clone();
     }
-    // We need to find the name from the CST or elsewhere.
-    // For now, let's use a unique stable name if possible.
     let name = SmolStr::from(format!("let_{}", id.into_raw().into_u32()));
     ctx.let_names.insert(id, name.clone());
     name
@@ -186,7 +179,10 @@ fn elaborate_expression(
                     let name = indexed_name_for_let(ctx, *l_id);
                     Var::Local(name)
                 }
-                _ => return None,
+                Some(lowering::TermVariableResolution::RecordPun(_)) => {
+                    Var::Local(SmolStr::new("pun_placeholder"))
+                }
+                None => return None,
             };
             Expr::Var(var)
         }
@@ -225,8 +221,8 @@ fn elaborate_expression(
         }
         ExpressionKind::Array { array } => {
             let mut exprs = Vec::new();
-            for id in array.iter() {
-                exprs.push(elaborate_expression(ctx, *id)?);
+            for id_expr in array.iter() {
+                exprs.push(elaborate_expression(ctx, *id_expr)?);
             }
             Expr::Literal(Literal::Array(exprs))
         }
@@ -241,6 +237,52 @@ fn elaborate_expression(
                 }
             }
             Expr::Literal(Literal::Object(fields))
+        }
+        ExpressionKind::IfThenElse { if_, then, else_ } => {
+            let cond = elaborate_expression(ctx, (*if_)?)?;
+            let then_expr = elaborate_expression(ctx, (*then)?)?;
+            let else_expr = elaborate_expression(ctx, (*else_)?)?;
+            
+            Expr::Case(
+                vec![cond],
+                vec![
+                    CaseAlternative {
+                        binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(true))],
+                        result: CaseResult::Expression(then_expr),
+                    },
+                    CaseAlternative {
+                        binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(false))],
+                        result: CaseResult::Expression(else_expr),
+                    },
+                ]
+            )
+        }
+        ExpressionKind::Parenthesized { parenthesized } => {
+            elaborate_expression(ctx, (*parenthesized)?)?
+        }
+        ExpressionKind::CaseOf { trunk, branches } => {
+            let trunk_exprs = trunk.iter().map(|e_id| elaborate_expression(ctx, *e_id)).collect::<Option<Vec<_>>>()?;
+            
+            let core_branches = branches.iter().map(|branch| {
+                let binders = branch.binders.iter().map(|b_id| {
+                    elaborate_binder(ctx, *b_id)
+                }).collect::<Option<Vec<_>>>()?;
+                
+                let result = match &branch.guarded_expression {
+                    Some(lowering::GuardedExpression::Unconditional { where_expression }) => {
+                        let body = elaborate_expression(ctx, where_expression.as_ref()?.expression?)?;
+                        CaseResult::Expression(body)
+                    }
+                    _ => return None,
+                };
+                
+                Some(CaseAlternative {
+                    binders,
+                    result,
+                })
+            }).collect::<Option<Vec<_>>>()?;
+            
+            Expr::Case(trunk_exprs, core_branches)
         }
         _ => return None,
     };
@@ -264,7 +306,7 @@ fn elaborate_binder(
             Some(Binder::Var(name))
         }
         BinderKind::Wildcard => Some(Binder::Wildcard),
-        _ => None, // TODO
+        _ => None,
     }
 }
 
@@ -294,7 +336,7 @@ fn inject_evidence(
 }
 
 fn inject_evidence_inner(
-    ctx: &mut ElaborationContext,
+    _ctx: &mut ElaborationContext,
     evidence: &Evidence,
 ) -> Expr {
     match evidence {

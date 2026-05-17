@@ -1,0 +1,8 @@
+---
+source: target/debug/build/tests-integration-d785e929c4a3c5a8/out/evaluating_generated.rs
+assertion_line: 12
+expression: report
+---
+module Main (evaluated)
+
+value test = 5

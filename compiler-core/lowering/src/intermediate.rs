@@ -461,6 +461,14 @@ impl LoweringInfo {
         self.type_operator.iter().map(|(o_id, (f_id, t_id))| (*o_id, *f_id, *t_id))
     }
 
+    pub fn iter_term_item(&self) -> impl Iterator<Item = (TermItemId, &TermItemIr)> {
+        self.term_item.iter().map(|(k, v)| (*k, v))
+    }
+
+    pub fn iter_type_item(&self) -> impl Iterator<Item = (TypeItemId, &TypeItemIr)> {
+        self.type_item.iter().map(|(k, v)| (*k, v))
+    }
+
     pub fn get_binder_kind(&self, id: BinderId) -> Option<&BinderKind> {
         self.binder_kind.get(&id)
     }

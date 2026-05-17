@@ -2562,6 +2562,7 @@ dependencies = [
  "lowering",
  "rowan",
  "serde_json",
+ "smol_str",
  "stabilizing",
  "sugar",
  "syntax",
