@@ -1,0 +1,116 @@
+---
+source: target/debug/build/tests-integration-d785e929c4a3c5a8/out/elaborating_generated.rs
+assertion_line: 12
+expression: report
+---
+module Main
+
+value test =
+  {
+    "App": [
+      {
+        "App": [
+          {
+            "Var": {
+              "Module": [
+                9,
+                0
+              ]
+            }
+          },
+          {
+            "Var": {
+              "Module": [
+                9,
+                1
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "Literal": {
+          "Boolean": true
+        }
+      }
+    ]
+  }
+
+value show =
+  {
+    "Abs": [
+      {
+        "Var": "dict"
+      },
+      {
+        "Accessor": [
+          "show",
+          {
+            "Var": {
+              "Local": "dict"
+            }
+          }
+        ]
+      }
+    ]
+  }
+
+value showBool =
+  {
+    "Literal": {
+      "Object": {
+        "show": {
+          "Abs": [
+            {
+              "Var": "b"
+            },
+            {
+              "Case": [
+                [
+                  {
+                    "Var": {
+                      "Local": "b"
+                    }
+                  }
+                ],
+                [
+                  {
+                    "binders": [
+                      {
+                        "Literal": {
+                          "Boolean": true
+                        }
+                      }
+                    ],
+                    "result": {
+                      "Expression": {
+                        "Literal": {
+                          "String": "true"
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "binders": [
+                      {
+                        "Literal": {
+                          "Boolean": false
+                        }
+                      }
+                    ],
+                    "result": {
+                      "Expression": {
+                        "Literal": {
+                          "String": "false"
+                        }
+                      }
+                    }
+                  }
+                ]
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }

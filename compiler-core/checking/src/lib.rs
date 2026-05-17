@@ -69,11 +69,12 @@ pub struct CheckedModule {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Evidence {
-    Instance(InstanceId, Vec<Evidence>),
+    Instance(FileId, InstanceId, Vec<Evidence>),
     Given(lowering::TypeId),
-    Superclass(Box<Evidence>, usize),
+    Superclass(FileId, Box<Evidence>, usize),
     Compiler,
     Multiple(Vec<Evidence>),
+    Record(FxHashMap<SmolStr, Evidence>),
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]

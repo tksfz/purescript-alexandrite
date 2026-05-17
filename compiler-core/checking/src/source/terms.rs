@@ -290,12 +290,24 @@ where
 
         lowering::ExpressionKind::Constructor { resolution } => {
             let Some((file_id, term_id)) = resolution else { return Ok(unknown) };
-            toolkit::lookup_file_term(state, context, *file_id, *term_id)
+            let t = toolkit::lookup_file_term(state, context, *file_id, *term_id)?;
+            let t = toolkit::instantiate_unifications(state, context, t)?;
+            let (t, wanteds) = toolkit::collect_wanteds(state, context, t)?;
+            if !wanteds.is_empty() {
+                state.checked.nodes.wanteds.insert(expression, wanteds);
+            }
+            Ok(t)
         }
 
         lowering::ExpressionKind::Variable { resolution } => {
             let Some(resolution) = *resolution else { return Ok(unknown) };
-            toolkit::lookup_term_variable(state, context, resolution)
+            let t = toolkit::lookup_term_variable(state, context, resolution)?;
+            let t = toolkit::instantiate_unifications(state, context, t)?;
+            let (t, wanteds) = toolkit::collect_wanteds(state, context, t)?;
+            if !wanteds.is_empty() {
+                state.checked.nodes.wanteds.insert(expression, wanteds);
+            }
+            Ok(t)
         }
 
         lowering::ExpressionKind::OperatorName { resolution } => {

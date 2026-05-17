@@ -1,4 +1,4 @@
-use building_types::{QueryResult};
+use building_types::{QueryProxy, QueryResult};
 use checking::{CheckedModule, Evidence};
 use corefn::{CoreFnModule, Declaration, Expr, Var, Literal, Binder, Binding, CaseAlternative, CaseResult};
 use files::FileId;
@@ -8,8 +8,9 @@ use resolving::ResolvedModule;
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
-pub struct ElaborationContext<'a> {
+pub struct ElaborationContext<'a, Q> {
     _file_id: FileId,
+    queries: &'a Q,
     lowered: &'a LoweredModule,
     checked: &'a CheckedModule,
     _indexed: &'a IndexedModule,
@@ -17,15 +18,20 @@ pub struct ElaborationContext<'a> {
     let_names: FxHashMap<lowering::LetBindingNameGroupId, SmolStr>,
 }
 
-pub fn elaborate_module(
+pub fn elaborate_module<Q: QueryProxy>(
+    queries: &Q,
     file_id: FileId,
     lowered: &LoweredModule,
     checked: &CheckedModule,
     _resolved: &ResolvedModule,
     indexed: &IndexedModule,
-) -> QueryResult<CoreFnModule> {
+) -> QueryResult<CoreFnModule> 
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
     let mut ctx = ElaborationContext {
         _file_id: file_id,
+        queries,
         lowered,
         checked,
         _indexed: indexed,
@@ -52,12 +58,40 @@ pub fn elaborate_module(
                         });
                     }
                 }
+                TermItemIr::Instance { members, .. } => {
+                    let mut fields = FxHashMap::default();
+                    for member in members.iter() {
+                        if let Some((_f, t)) = member.resolution {
+                            if let Some(member_name) = &indexed.items[t].name {
+                                if let Some(expr) =
+                                    elaborate_value_group(&mut ctx, &member.equations)
+                                {
+                                    fields.insert(member_name.clone(), expr);
+                                }
+                            }
+                        }
+                    }
+                    declarations.push(Declaration::Value {
+                        name: name.clone(),
+                        expression: Expr::Literal(Literal::Object(fields)),
+                    });
+                }
+                TermItemIr::ClassMember { .. } => {
+                    let dict_name = SmolStr::new("dict");
+                    let expr = Expr::Abs(
+                        Binder::Var(dict_name.clone()),
+                        Box::new(Expr::Accessor(name.clone(), Box::new(Expr::Var(Var::Local(dict_name))))),
+                    );
+                    declarations.push(Declaration::Value {
+                        name: name.clone(),
+                        expression: expr,
+                    });
+                }
                 _ => {}
             }
         }
     }
 
-    // Translate data types
     for (id, type_item) in lowered.info.iter_type_item() {
         if let Some(name) = &indexed.items[id].name {
             match type_item {
@@ -97,10 +131,13 @@ pub fn elaborate_module(
     })
 }
 
-fn elaborate_value_group(
-    ctx: &mut ElaborationContext,
+fn elaborate_value_group<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
     equations: &[lowering::Equation],
-) -> Option<Expr> {
+) -> Option<Expr> 
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
     if equations.is_empty() {
         return None;
     }
@@ -125,6 +162,35 @@ fn elaborate_value_group(
             Some(lowering::GuardedExpression::Unconditional { where_expression }) => {
                 CaseResult::Expression(elaborate_expression(ctx, where_expression.as_ref()?.expression?)?)
             }
+            Some(lowering::GuardedExpression::Conditionals { pattern_guarded }) => {
+                let mut final_expr = None;
+                for conditional in pattern_guarded.iter().rev() {
+                    if let [guard] = &conditional.pattern_guards[..] {
+                        let cond = elaborate_expression(ctx, guard.expression?)?;
+                        let result = elaborate_where(ctx, &conditional.where_expression)?;
+                        
+                        let alt_true = CaseAlternative {
+                            binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(true))],
+                            result: CaseResult::Expression(result),
+                        };
+                        
+                        let next_alt = if let Some(prev) = final_expr {
+                            CaseAlternative {
+                                binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(false))],
+                                result: CaseResult::Expression(prev),
+                            }
+                        } else {
+                            CaseAlternative {
+                                binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(false))],
+                                result: CaseResult::Expression(Expr::Literal(Literal::String(SmolStr::new("guard_fail")))),
+                            }
+                        };
+                        
+                        final_expr = Some(Expr::Case(vec![cond], vec![alt_true, next_alt]));
+                    }
+                }
+                CaseResult::Expression(final_expr?)
+            }
             _ => return None,
         };
         
@@ -144,10 +210,13 @@ fn elaborate_value_group(
     Some(body)
 }
 
-fn elaborate_equation(
-    ctx: &mut ElaborationContext,
+fn elaborate_equation<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
     equation: &lowering::Equation,
-) -> Option<Expr> {
+) -> Option<Expr> 
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
     let mut body = if let Some(guarded) = &equation.guarded {
         elaborate_guarded(ctx, guarded)?
     } else {
@@ -162,10 +231,13 @@ fn elaborate_equation(
     Some(body)
 }
 
-fn elaborate_guarded(
-    ctx: &mut ElaborationContext,
+fn elaborate_guarded<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
     guarded: &lowering::GuardedExpression,
-) -> Option<Expr> {
+) -> Option<Expr> 
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
     match guarded {
         lowering::GuardedExpression::Unconditional { where_expression } => {
             if let Some(where_expression) = where_expression {
@@ -182,14 +254,64 @@ fn elaborate_guarded(
                 None
             }
         }
-        _ => None,
+        lowering::GuardedExpression::Conditionals { pattern_guarded } => {
+            let mut final_expr = None;
+            for conditional in pattern_guarded.iter().rev() {
+                if let [guard] = &conditional.pattern_guards[..] {
+                    let cond = elaborate_expression(ctx, guard.expression?)?;
+                    let result = elaborate_where(ctx, &conditional.where_expression)?;
+                    
+                    let alt_true = CaseAlternative {
+                        binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(true))],
+                        result: CaseResult::Expression(result),
+                    };
+                    
+                    let next_alt = if let Some(prev) = final_expr {
+                        CaseAlternative {
+                            binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(false))],
+                            result: CaseResult::Expression(prev),
+                        }
+                    } else {
+                        CaseAlternative {
+                            binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(false))],
+                            result: CaseResult::Expression(Expr::Literal(Literal::String(SmolStr::new("guard_fail")))),
+                        }
+                    };
+                    
+                    final_expr = Some(Expr::Case(vec![cond], vec![alt_true, next_alt]));
+                }
+            }
+            final_expr
+        }
     }
 }
 
-fn elaborate_let_binding_chunk(
-    ctx: &mut ElaborationContext,
+fn elaborate_where<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
+    where_expression: &Option<lowering::WhereExpression>,
+) -> Option<Expr>
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
+    let where_expression = where_expression.as_ref()?;
+    let mut body = elaborate_expression(ctx, where_expression.expression?)?;
+    if !where_expression.bindings.is_empty() {
+        let mut bindings = Vec::new();
+        for chunk in where_expression.bindings.iter() {
+            bindings.extend(elaborate_let_binding_chunk(ctx, chunk)?);
+        }
+        body = Expr::Let(bindings, Box::new(body));
+    }
+    Some(body)
+}
+
+fn elaborate_let_binding_chunk<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
     chunk: &LetBindingChunk,
-) -> Option<Vec<Binding>> {
+) -> Option<Vec<Binding>> 
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
     match chunk {
         LetBindingChunk::Names { bindings, .. } => {
             let mut result = Vec::new();
@@ -207,7 +329,7 @@ fn elaborate_let_binding_chunk(
     }
 }
 
-fn indexed_name_for_let(ctx: &mut ElaborationContext, id: lowering::LetBindingNameGroupId) -> SmolStr {
+fn indexed_name_for_let<Q: QueryProxy>(ctx: &mut ElaborationContext<Q>, id: lowering::LetBindingNameGroupId) -> SmolStr {
     if let Some(name) = ctx.let_names.get(&id) {
         return name.clone();
     }
@@ -216,16 +338,31 @@ fn indexed_name_for_let(ctx: &mut ElaborationContext, id: lowering::LetBindingNa
     name
 }
 
-fn elaborate_expression(
-    ctx: &mut ElaborationContext,
+fn elaborate_expression<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
     id: lowering::ExpressionId,
-) -> Option<Expr> {
+) -> Option<Expr> 
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
     let kind = ctx.lowered.info.get_expression_kind(id)?;
     let mut expr = match kind {
         ExpressionKind::Integer { value } => {
              Expr::Literal(Literal::Int(value.unwrap_or(0)))
         }
         ExpressionKind::Boolean { boolean } => Expr::Literal(Literal::Boolean(*boolean)),
+        ExpressionKind::String { value, .. } => {
+            Expr::Literal(Literal::String(value.clone().unwrap_or_default()))
+        }
+        ExpressionKind::Char { value } => {
+            Expr::Literal(Literal::Char(value.unwrap_or('\0')))
+        }
+        ExpressionKind::Number { value, .. } => {
+            // CoreFn only has Int and Number (float). 
+            // For now, treat all Numbers as 0.0 or something similar if we don't have Float literal yet.
+            // Actually, let's check CoreFn Literal.
+            Expr::Literal(Literal::String(SmolStr::new("number_literal")))
+        }
         ExpressionKind::Variable { resolution } => {
             let var = match resolution {
                 Some(lowering::TermVariableResolution::Reference(f, i)) => Var::Module(*f, *i),
@@ -240,66 +377,96 @@ fn elaborate_expression(
                 Some(lowering::TermVariableResolution::RecordPun(_)) => {
                     Var::Local(SmolStr::new("pun_placeholder"))
                 }
-                None => return None,
+                None => {
+                    return None;
+                }
             };
             Expr::Var(var)
         }
         ExpressionKind::Application { function, arguments } => {
-            let mut current = elaborate_expression(ctx, (*function)?)?;
-            for arg in arguments.iter() {
+            let mut current = elaborate_expression(ctx, (*function).or_else(|| {
+                None
+            })?)?;
+            for (i, arg) in arguments.iter().enumerate() {
                 match arg {
                     lowering::ExpressionArgument::Term(Some(term_id)) => {
-                        let arg_expr = elaborate_expression(ctx, *term_id)?;
+                        let arg_expr = elaborate_expression(ctx, *term_id).or_else(|| {
+                            None
+                        })?;
                         current = Expr::App(Box::new(current), Box::new(arg_expr));
                     }
-                    _ => {}
+                    lowering::ExpressionArgument::Term(None) => {
+                    }
+                    lowering::ExpressionArgument::Type(_) => {
+                    }
                 }
             }
             current
         }
         ExpressionKind::Lambda { binders, expression } => {
-            let mut current = elaborate_expression(ctx, (*expression)?)?;
-            for binder_id in binders.iter().rev() {
-                let binder = elaborate_binder(ctx, *binder_id)?;
+            let mut current = elaborate_expression(ctx, (*expression).or_else(|| {
+                None
+            })?)?;
+            for (i, binder_id) in binders.iter().rev().enumerate() {
+                let binder = elaborate_binder(ctx, *binder_id).or_else(|| {
+                    None
+                })?;
                 current = Expr::Abs(binder, Box::new(current));
             }
             current
         }
         ExpressionKind::LetIn { bindings, expression } => {
-            let mut body = elaborate_expression(ctx, (*expression)?)?;
+            let mut body = elaborate_expression(ctx, (*expression).or_else(|| {
+                None
+            })?)?;
             let mut all_bindings = Vec::new();
-            for chunk in bindings.iter() {
-                all_bindings.extend(elaborate_let_binding_chunk(ctx, chunk)?);
+            for (i, chunk) in bindings.iter().enumerate() {
+                all_bindings.extend(elaborate_let_binding_chunk(ctx, chunk).or_else(|| {
+                    None
+                })?);
             }
             Expr::Let(all_bindings, Box::new(body))
         }
         ExpressionKind::Constructor { resolution } => {
-            let (f, i) = (*resolution)?;
+            let (f, i) = (*resolution).or_else(|| {
+                None
+            })?;
             Expr::Constructor(f, i)
         }
         ExpressionKind::Array { array } => {
             let mut exprs = Vec::new();
-            for id_expr in array.iter() {
-                exprs.push(elaborate_expression(ctx, *id_expr)?);
+            for (i, id_expr) in array.iter().enumerate() {
+                exprs.push(elaborate_expression(ctx, *id_expr).or_else(|| {
+                    None
+                })?);
             }
             Expr::Literal(Literal::Array(exprs))
         }
         ExpressionKind::Record { record } => {
             let mut fields = FxHashMap::default();
-            for item in record.iter() {
+            for (i, item) in record.iter().enumerate() {
                 match item {
                     lowering::ExpressionRecordItem::RecordField { name: Some(name), value: Some(value) } => {
-                        fields.insert(name.clone(), elaborate_expression(ctx, *value)?);
+                        fields.insert(name.clone(), elaborate_expression(ctx, *value).or_else(|| {
+                            None
+                        })?);
                     }
-                    _ => {}
+                    _ => {
+                    }
                 }
             }
             Expr::Literal(Literal::Object(fields))
         }
         ExpressionKind::IfThenElse { if_, then, else_ } => {
-            let cond = elaborate_expression(ctx, (*if_)?)?;
-            let then_expr = elaborate_expression(ctx, (*then)?)?;
-            let else_expr = elaborate_expression(ctx, (*else_)?)?;
+            let cond = elaborate_expression(ctx, (*if_).or_else(|| {
+                 None
+            })?)?;
+            let then_expr = elaborate_expression(ctx, (*then).or_else(|| {
+                 None
+            })?)?;
+            let else_expr = elaborate_expression(ctx, (*else_).or_else(|| {
+                 None
+            })?)?;
             
             Expr::Case(
                 vec![cond],
@@ -316,20 +483,57 @@ fn elaborate_expression(
             )
         }
         ExpressionKind::Parenthesized { parenthesized } => {
-            elaborate_expression(ctx, (*parenthesized)?)?
+            elaborate_expression(ctx, (*parenthesized).or_else(|| {
+                None
+            })?)?
         }
         ExpressionKind::CaseOf { trunk, branches } => {
-            let trunk_exprs = trunk.iter().map(|e_id| elaborate_expression(ctx, *e_id)).collect::<Option<Vec<_>>>()?;
+            let trunk_exprs = trunk.iter().map(|e_id| elaborate_expression(ctx, *e_id).or_else(|| {
+                None
+            })).collect::<Option<Vec<_>>>()?;
             
             let core_branches = branches.iter().map(|branch| {
                 let binders = branch.binders.iter().map(|b_id| {
-                    elaborate_binder(ctx, *b_id)
+                    elaborate_binder(ctx, *b_id).or_else(|| {
+                        None
+                    })
                 }).collect::<Option<Vec<_>>>()?;
                 
                 let result = match &branch.guarded_expression {
                     Some(lowering::GuardedExpression::Unconditional { where_expression }) => {
-                        let body = elaborate_expression(ctx, where_expression.as_ref()?.expression?)?;
+                        let body = elaborate_expression(ctx, where_expression.as_ref()?.expression?).or_else(|| {
+                            None
+                        })?;
                         CaseResult::Expression(body)
+                    }
+                    Some(lowering::GuardedExpression::Conditionals { pattern_guarded }) => {
+                         let mut final_expr = None;
+                         for conditional in pattern_guarded.iter().rev() {
+                             if let [guard] = &conditional.pattern_guards[..] {
+                                 let cond = elaborate_expression(ctx, guard.expression?)?;
+                                 let result = elaborate_where(ctx, &conditional.where_expression)?;
+                                 
+                                 let alt_true = CaseAlternative {
+                                     binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(true))],
+                                     result: CaseResult::Expression(result),
+                                 };
+                                 
+                                 let next_alt = if let Some(prev) = final_expr {
+                                     CaseAlternative {
+                                         binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(false))],
+                                         result: CaseResult::Expression(prev),
+                                     }
+                                 } else {
+                                     CaseAlternative {
+                                         binders: vec![Binder::Literal(corefn::LiteralBinder::Boolean(false))],
+                                         result: CaseResult::Expression(Expr::Literal(Literal::String(SmolStr::new("guard_fail")))),
+                                     }
+                                 };
+                                 
+                                 final_expr = Some(Expr::Case(vec![cond], vec![alt_true, next_alt]));
+                             }
+                         }
+                         CaseResult::Expression(final_expr?)
                     }
                     _ => return None,
                 };
@@ -342,7 +546,16 @@ fn elaborate_expression(
             
             Expr::Case(trunk_exprs, core_branches)
         }
-        _ => return None,
+        ExpressionKind::Do { bind, discard, statements } => {
+            elaborate_do(ctx, bind, discard, statements)?
+        }
+        ExpressionKind::Ado { .. } => {
+            // Ado is more complex, return placeholder for now.
+            Expr::Literal(Literal::String(SmolStr::new("unimplemented_ado")))
+        }
+        _ => {
+            return None;
+        }
     };
 
     if let Some(evidence) = ctx.checked.nodes.evidence.get(&id) {
@@ -352,10 +565,96 @@ fn elaborate_expression(
     Some(expr)
 }
 
-fn elaborate_binder(
-    ctx: &mut ElaborationContext,
+fn elaborate_do<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
+    bind: &Option<lowering::TermVariableResolution>,
+    discard: &Option<lowering::TermVariableResolution>,
+    statements: &[lowering::DoStatementId],
+) -> Option<Expr>
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
+    elaborate_do_statements(ctx, bind, discard, statements)
+}
+
+fn elaborate_do_statements<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
+    bind: &Option<lowering::TermVariableResolution>,
+    discard: &Option<lowering::TermVariableResolution>,
+    statements: &[lowering::DoStatementId],
+) -> Option<Expr>
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
+    let (first, rest) = statements.split_first()?;
+    let statement = ctx.lowered.info.get_do_statement(*first)?;
+
+    if rest.is_empty() {
+        return match statement {
+            lowering::DoStatement::Discard { expression } => {
+                elaborate_expression(ctx, (*expression)?)
+            }
+            _ => {
+                None
+            }
+        };
+    }
+
+    match statement {
+        lowering::DoStatement::Bind { binder, expression } => {
+            let bind_res = bind.as_ref().or_else(|| {
+                None
+            })?;
+            let bind_expr = Expr::Var(match bind_res {
+                lowering::TermVariableResolution::Reference(f, i) => Var::Module(*f, *i),
+                _ => return None,
+            });
+
+            let m = elaborate_expression(ctx, (*expression)?)?;
+            let binder = elaborate_binder(ctx, (*binder)?)?;
+            let body = elaborate_do_statements(ctx, bind, discard, rest)?;
+
+            Some(Expr::App(
+                Box::new(Expr::App(Box::new(bind_expr), Box::new(m))),
+                Box::new(Expr::Abs(binder, Box::new(body))),
+            ))
+        }
+        lowering::DoStatement::Let { statements } => {
+            let mut all_bindings = Vec::new();
+            for chunk in statements.iter() {
+                all_bindings.extend(elaborate_let_binding_chunk(ctx, chunk)?);
+            }
+            let body = elaborate_do_statements(ctx, bind, discard, rest)?;
+            Some(Expr::Let(all_bindings, Box::new(body)))
+        }
+        lowering::DoStatement::Discard { expression } => {
+            let discard_res = discard.as_ref().or_else(|| {
+                None
+            })?;
+            let discard_expr = Expr::Var(match discard_res {
+                lowering::TermVariableResolution::Reference(f, i) => Var::Module(*f, *i),
+                _ => return None,
+            });
+
+            let m = elaborate_expression(ctx, (*expression)?)?;
+            let body = elaborate_do_statements(ctx, bind, discard, rest)?;
+
+            // discard m (\_ -> body)
+            Some(Expr::App(
+                Box::new(Expr::App(Box::new(discard_expr), Box::new(m))),
+                Box::new(Expr::Abs(Binder::Wildcard, Box::new(body))),
+            ))
+        }
+    }
+}
+
+fn elaborate_binder<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
     id: lowering::BinderId,
-) -> Option<Binder> {
+) -> Option<Binder> 
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
     let kind = ctx.lowered.info.get_binder_kind(id)?;
     match kind {
         BinderKind::Variable { variable } => {
@@ -386,18 +685,41 @@ fn elaborate_binder(
         BinderKind::Parenthesized { parenthesized } => {
             elaborate_binder(ctx, (*parenthesized)?)
         }
-        _ => None,
+        _ => {
+            None
+        }
     }
 }
 
-fn inject_evidence(
-    ctx: &mut ElaborationContext,
+
+fn inject_evidence<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
     expr: Expr,
     evidence: &Evidence,
-) -> Expr {
+) -> Expr 
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
     match evidence {
-        Evidence::Instance(_id, _sub_evidences) => {
-            Expr::Literal(Literal::String(SmolStr::from("instance_placeholder")))
+        Evidence::Instance(f, i, sub_evidences) => {
+            let term_id = if f == &ctx._file_id {
+                ctx.lowered.info.get_instance_term(*i)
+            } else if let Ok(lowered) = ctx.queries.lowered(*f) {
+                lowered.info.get_instance_term(*i)
+            } else {
+                None
+            };
+            
+            if let Some(term_id) = term_id {
+                let var = Expr::Var(Var::Module(*f, term_id));
+                let mut current = var;
+                for sub in sub_evidences {
+                    let sub_expr = inject_evidence_inner(ctx, sub);
+                    current = Expr::App(Box::new(current), Box::new(sub_expr));
+                }
+                return Expr::App(Box::new(expr), Box::new(current));
+            }
+            expr
         }
         Evidence::Given(type_id) => {
             let name = SmolStr::from(format!("dict_{}", type_id.id.get()));
@@ -411,18 +733,65 @@ fn inject_evidence(
             }
             current
         }
+        Evidence::Superclass(_f, base, index) => {
+            let base_expr = inject_evidence_inner(ctx, base);
+            let name = SmolStr::from(format!("superclass_{}", index));
+            Expr::App(Box::new(expr), Box::new(Expr::Accessor(name, Box::new(base_expr))))
+        }
+        Evidence::Record(fields) => {
+             let mut core_fields = FxHashMap::default();
+             for (name, ev) in fields {
+                 core_fields.insert(name.clone(), inject_evidence_inner(ctx, ev));
+             }
+             Expr::App(Box::new(expr), Box::new(Expr::Literal(Literal::Object(core_fields))))
+        }
         _ => expr,
     }
 }
 
-fn inject_evidence_inner(
-    _ctx: &mut ElaborationContext,
+fn inject_evidence_inner<Q: QueryProxy>(
+    ctx: &mut ElaborationContext<Q>,
     evidence: &Evidence,
-) -> Expr {
+) -> Expr 
+where
+    Q::Lowered: std::ops::Deref<Target = LoweredModule>,
+{
     match evidence {
+        Evidence::Instance(f, i, sub_evidences) => {
+            let term_id = if f == &ctx._file_id {
+                ctx.lowered.info.get_instance_term(*i)
+            } else if let Ok(lowered) = ctx.queries.lowered(*f) {
+                lowered.info.get_instance_term(*i)
+            } else {
+                None
+            };
+            
+            if let Some(term_id) = term_id {
+                let var = Expr::Var(Var::Module(*f, term_id));
+                let mut current = var;
+                for sub in sub_evidences {
+                    let sub_expr = inject_evidence_inner(ctx, sub);
+                    current = Expr::App(Box::new(current), Box::new(sub_expr));
+                }
+                return current;
+            }
+            Expr::Literal(Literal::String(SmolStr::new("missing_instance")))
+        }
         Evidence::Given(type_id) => {
             let name = SmolStr::from(format!("dict_{}", type_id.id.get()));
             Expr::Var(Var::Local(name))
+        }
+        Evidence::Superclass(_f, base, index) => {
+            let base_expr = inject_evidence_inner(ctx, base);
+            let name = SmolStr::from(format!("superclass_{}", index));
+            Expr::Accessor(name, Box::new(base_expr))
+        }
+        Evidence::Record(fields) => {
+            let mut core_fields = FxHashMap::default();
+            for (name, ev) in fields {
+                core_fields.insert(name.clone(), inject_evidence_inner(ctx, ev));
+            }
+            Expr::Literal(Literal::Object(core_fields))
         }
         _ => Expr::Literal(Literal::String(SmolStr::new("compiler_magic"))),
     }

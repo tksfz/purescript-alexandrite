@@ -490,6 +490,7 @@ fn lower_term_item(state: &mut State, context: &Context, item_id: TermItemId, it
 
             let kind = TermItemIr::Instance { constraints, resolution, arguments, members };
             state.info.term_item.insert(item_id, kind);
+            state.info.instance_term.insert(*id, item_id);
         }
 
         TermItemKind::Operator { id } => {

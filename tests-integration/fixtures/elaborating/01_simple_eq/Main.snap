@@ -11,12 +11,24 @@ value test =
       {
         "App": [
           {
-            "Var": {
-              "Module": [
-                9,
-                0
-              ]
-            }
+            "App": [
+              {
+                "Var": {
+                  "Module": [
+                    9,
+                    0
+                  ]
+                }
+              },
+              {
+                "Var": {
+                  "Module": [
+                    9,
+                    1
+                  ]
+                }
+              }
+            ]
           },
           {
             "Literal": {
@@ -31,4 +43,76 @@ value test =
         }
       }
     ]
+  }
+
+value eq =
+  {
+    "Abs": [
+      {
+        "Var": "dict"
+      },
+      {
+        "Accessor": [
+          "eq",
+          {
+            "Var": {
+              "Local": "dict"
+            }
+          }
+        ]
+      }
+    ]
+  }
+
+value eqInt =
+  {
+    "Literal": {
+      "Object": {
+        "eq": {
+          "Abs": [
+            {
+              "Var": "arg0"
+            },
+            {
+              "Abs": [
+                {
+                  "Var": "arg1"
+                },
+                {
+                  "Case": [
+                    [
+                      {
+                        "Var": {
+                          "Local": "arg0"
+                        }
+                      },
+                      {
+                        "Var": {
+                          "Local": "arg1"
+                        }
+                      }
+                    ],
+                    [
+                      {
+                        "binders": [
+                          "Wildcard",
+                          "Wildcard"
+                        ],
+                        "result": {
+                          "Expression": {
+                            "Literal": {
+                              "Boolean": true
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
   }

@@ -21,6 +21,8 @@ pub struct InstanceCandidate {
     pub id: Option<InstanceChainId>,
     /// The ID of the instance itself.
     pub instance_id: Option<indexing::InstanceId>,
+    /// The file ID where the instance is defined.
+    pub file_id: FileId,
     /// The position of the instance in the chain.
     pub position: u32,
     /// Type information about the instance.
@@ -66,6 +68,7 @@ where
                 &mut instances,
                 &state.checked,
                 &context.indexed,
+                file_id,
                 constraint.file_id,
                 constraint.type_id,
             );
@@ -76,6 +79,7 @@ where
                 &mut instances,
                 &checked,
                 &indexed,
+                file_id,
                 constraint.file_id,
                 constraint.type_id,
             );
@@ -107,6 +111,7 @@ fn collect_instances_from_checked(
     output: &mut Vec<InstanceCandidate>,
     checked: &CheckedModule,
     indexed: &IndexedModule,
+    file_id: FileId,
     class_file: FileId,
     class_id: TypeItemId,
 ) {
@@ -118,6 +123,7 @@ fn collect_instances_from_checked(
             .map(|(&id, &instance)| InstanceCandidate {
                 id: indexed.pairs.instance_chain_id(id),
                 instance_id: Some(id),
+                file_id,
                 position: indexed.pairs.instance_chain_position(id).unwrap_or(0),
                 instance,
             }),
@@ -131,6 +137,7 @@ fn collect_instances_from_checked(
             .map(|&instance| InstanceCandidate {
                 id: None,
                 instance_id: None,
+                file_id,
                 position: 0,
                 instance,
             }),

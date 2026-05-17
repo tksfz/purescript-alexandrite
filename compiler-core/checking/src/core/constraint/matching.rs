@@ -268,7 +268,11 @@ where
             crate::Evidence::Given(source)
         } else {
             // This happens for superclasses where the source is the original given
-            crate::Evidence::Compiler // Placeholder, should ideally be Superclass
+            crate::Evidence::Superclass(
+                wanted_canonical.file_id,
+                Box::new(crate::Evidence::Compiler),
+                0,
+            ) // Placeholder
         };
 
         return Ok(MatchInstance::Match(InstanceMatch::from_unifications(
@@ -441,7 +445,7 @@ where
 
         let evidence = if let Some(instance_id) = candidate.instance_id {
             // We'll need a way to collect sub-evidence, but for now we mark the instance
-            crate::Evidence::Instance(instance_id, vec![])
+            crate::Evidence::Instance(candidate.file_id, instance_id, vec![])
         } else {
             crate::Evidence::Compiler
         };

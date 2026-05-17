@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use files::FileId;
-use indexing::{TermItemId, TypeItemId};
+use indexing::{InstanceId, TermItemId, TypeItemId};
 use la_arena::{Arena, ArenaMap, Idx};
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
@@ -434,6 +434,7 @@ pub struct LoweringInfo {
 
     pub(crate) term_operator: FxHashMap<TermOperatorId, (FileId, TermItemId)>,
     pub(crate) type_operator: FxHashMap<TypeOperatorId, (FileId, TypeItemId)>,
+    pub(crate) instance_term: FxHashMap<InstanceId, TermItemId>,
 }
 
 impl LoweringInfo {
@@ -507,5 +508,9 @@ impl LoweringInfo {
 
     pub fn get_type_operator(&self, id: TypeOperatorId) -> Option<(FileId, TypeItemId)> {
         self.type_operator.get(&id).copied()
+    }
+
+    pub fn get_instance_term(&self, id: InstanceId) -> Option<TermItemId> {
+        self.instance_term.get(&id).copied()
     }
 }

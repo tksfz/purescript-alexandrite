@@ -23,12 +23,14 @@ The project was extended to support a standard functional compiler pipeline:
   - Injects "evidence" (dictionaries) into applications of constrained functions.
   - Desugars `IfThenElse` into CoreFn `Case` expressions.
   - Supports `Lambda`, `Let`, `Array`, `Record`, and `Constructor` expressions.
+  - Elaborates `Data` declarations and `Constructor` expressions.
 
 ### `compiler-core/evaluating`
 - The execution engine.
 - **Value System**: Supports integers, strings, booleans, closures, and data constructors.
 - **Environment**: Manages lexical scoping.
 - **Recursion Support**: Uses a shared `Arc<RwLock>` module environment, allowing closures to resolve top-level names across the entire module.
+- **Pattern Matching**: Fully supports nested constructor patterns and literals in `case` expressions.
 - **FFI**: A native Rust function bridge (`Value::Foreign`) for host-provided logic.
 
 ## 3. Integration & Testing
@@ -41,15 +43,17 @@ The project was extended to support a standard functional compiler pipeline:
 1. `01_simple_let`: Complex local scoping and lambdas.
 2. `02_simple_eq`: Basic typeclass dictionary injection.
 3. `03_ffi_log`: PureScript `Effect` handling and side-effect capturing.
-4. `04_recursion`: A recursive Fibonacci implementation (`fib 5` -> `5`).
+4. `04_recursion`: Recursive Fibonacci and ADT pattern matching (`fib 5` and `isJust (Just 1)`).
 
 ## 4. Key Milestones
 - **IR & Evidence**: Established the "plumbing" between type-checking and code-gen.
 - **Literal Values**: Fixed a major gap in the lowering phase where literal values were being discarded.
-- **Recursive Scoping**: Solved the "chicken-and-egg" problem of module-level recursion in the interpreter.
+- **Recursive Scoping**: Solved the "chicken-and-egg" problem of module-level recursion in the interpreter using a multi-pass registration strategy.
+- **ADT Support**: Full round-trip support for custom data types, from declaration to construction and pattern matching.
 - **Effect Execution**: Correctly implemented the PureScript `Effect` pattern (thunking side effects).
 
 ## Next Steps
 - **Desugaring Phase**: Move `do` and `ado` blocks from elaboration into a dedicated desugaring pass.
 - **Full Dictionary Injection**: Complete the mapping of instance members into dictionary records.
 - **Standard Library**: Register more FFIs to support the standard `Prelude`.
+- **Recursive Let**: Support `let rec` for local recursive definitions.

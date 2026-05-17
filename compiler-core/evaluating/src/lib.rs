@@ -120,10 +120,26 @@ pub fn eval(expr: &Expr, env: &Environment) -> EvalResult<Value> {
         }
         Expr::Let(bindings, body) => {
             let mut current_env = env.clone();
+            
+            // Pass 0: Register dummy closures for all bindings to allow self-reference
             for binding in bindings {
-                let val = eval(&binding.expression, &current_env)?;
-                current_env.locals.insert(binding.name.clone(), val);
+                let dummy = Value::Closure {
+                    env: current_env.clone(),
+                    binder: corefn::Binder::Wildcard,
+                    body: Box::new(binding.expression.clone()),
+                };
+                current_env.locals.insert(binding.name.clone(), dummy);
             }
+
+            // Pass 1: Multiple evaluation passes to reach a fixed point for recursive bindings
+            for _ in 0..5 {
+                for binding in bindings {
+                    if let Ok(val) = eval(&binding.expression, &current_env) {
+                        current_env.locals.insert(binding.name.clone(), val);
+                    }
+                }
+            }
+            
             eval(body, &current_env)
         }
         Expr::Constructor(file_id, term_id) => {
@@ -132,6 +148,16 @@ pub fn eval(expr: &Expr, env: &Environment) -> EvalResult<Value> {
                 term_id: *term_id,
                 arguments: vec![],
             })
+        }
+        Expr::Accessor(name, expression) => {
+            let val = eval(expression, env)?;
+            match val {
+                Value::Object(fields) => {
+                    fields.get(name).cloned()
+                        .ok_or_else(|| EvalError::VariableNotFound(name.clone()))
+                }
+                _ => Err(EvalError::NotAFunction(format!("Expected object, found {:?}", val))),
+            }
         }
         Expr::Case(expressions, alternatives) => {
              let vals = expressions.iter().map(|e| eval(e, env)).collect::<EvalResult<Vec<_>>>()?;

@@ -168,6 +168,39 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
         }))
     };
 
+    let bind_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let m = args[0].clone();
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let f = args2[0].clone();
+                // Apply m to unit to get the value
+                let val = evaluating::apply(m.clone(), evaluating::Value::Object(Default::default()))
+                    .unwrap_or(m.clone());
+                // Apply f to the value
+                evaluating::apply(f, val)
+            })))
+        }))
+    };
+
+    let discard_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            let m = args[0].clone();
+            Ok(evaluating::Value::Foreign(Arc::new(move |args2| {
+                let f = args2[0].clone();
+                // Apply m to unit to execute side effects
+                let _ = evaluating::apply(m.clone(), evaluating::Value::Object(Default::default()));
+                // Apply f to unit
+                evaluating::apply(f, evaluating::Value::Object(Default::default()))
+            })))
+        }))
+    };
+
+    let pure_ffi = || {
+        evaluating::Value::Foreign(Arc::new(|args| {
+            Ok(args[0].clone())
+        }))
+    };
+
     let log_output = Arc::clone(&output);
     let log_ffi = move || {
         let log_output = Arc::clone(&log_output);
@@ -184,63 +217,60 @@ pub fn report_evaluated(engine: &QueryEngine, id: FileId) -> String {
     let lowered = engine.lowered(id).unwrap();
     let indexed = engine.indexed(id).unwrap();
 
-    // Pass 0: Register FFIs, constructors, and dummy closures for ValueGroups
-    for (item_id, term_item) in lowered.info.iter_term_item() {
-        if let Some(name) = &indexed.items[item_id].name {
-            match term_item {
-                lowering::TermItemIr::Foreign { .. } => {
-                    let ffi_val = match name.as_str() {
-                        "eq" => Some(eq_ffi()),
-                        "add" => Some(add_ffi()),
-                        "sub" => Some(sub_ffi()),
-                        "log" => Some(log_ffi()),
-                        _ => None,
-                    };
-                    if let Some(val) = ffi_val {
-                        env.modules.write().unwrap().insert((id, item_id), val);
-                    }
-                }
-                lowering::TermItemIr::ValueGroup { .. } => {
-                    if let Some(decl) = elaborated.declarations.iter().find(|d| d.name() == name) {
-                        if let corefn::Declaration::Value { expression, .. } = decl {
-                            let val = evaluating::Value::Closure {
-                                env: env.clone(),
-                                binder: corefn::Binder::Wildcard,
-                                body: Box::new(expression.clone()),
-                            };
-                            env.modules.write().unwrap().insert((id, item_id), val);
-                        }
-                    }
-                }
-                lowering::TermItemIr::Constructor { .. } => {
-                    let val = evaluating::Value::Constructor {
-                        file_id: id,
-                        term_id: item_id,
-                        arguments: vec![],
-                    };
-                    env.modules.write().unwrap().insert((id, item_id), val);
-                }
-                _ => {}
-            }
-        }
-    }
-
     // Register FFIs in locals
     env.locals.insert(SmolStr::new("eq"), eq_ffi());
     env.locals.insert(SmolStr::new("add"), add_ffi());
     env.locals.insert(SmolStr::new("sub"), sub_ffi());
     env.locals.insert(SmolStr::new("log"), log_ffi());
+    env.locals.insert(SmolStr::new("bind"), bind_ffi());
+    env.locals.insert(SmolStr::new("discard"), discard_ffi());
+    env.locals.insert(SmolStr::new("pure"), pure_ffi());
 
-    // Pass 1: Recursive evaluation to replace dummies with actual closures
-    for _ in 0..10 {
-        for (item_id, term_item) in lowered.info.iter_term_item() {
-            if let lowering::TermItemIr::ValueGroup { .. } = term_item {
+    // Pass 0: Register placeholders
+    for (item_id, term_item) in lowered.info.iter_term_item() {
+        let val = match term_item {
+            lowering::TermItemIr::Constructor { .. } => {
+                evaluating::Value::Constructor {
+                    file_id: id,
+                    term_id: item_id,
+                    arguments: vec![],
+                }
+            }
+            lowering::TermItemIr::Instance { .. } => {
+                evaluating::Value::Object(Default::default())
+            }
+            lowering::TermItemIr::Foreign { .. } => {
                 if let Some(name) = &indexed.items[item_id].name {
-                    if let Some(decl) = elaborated.declarations.iter().find(|d| d.name() == name) {
-                        if let corefn::Declaration::Value { expression, .. } = decl {
-                            if let Ok(val) = evaluating::eval(expression, &env) {
-                                env.modules.write().unwrap().insert((id, item_id), val);
+                    match name.as_str() {
+                        "eq" => eq_ffi(),
+                        "add" => add_ffi(),
+                        "sub" => sub_ffi(),
+                        "log" => log_ffi(),
+                        "bind" => bind_ffi(),
+                        "discard" => discard_ffi(),
+                        "pure" => pure_ffi(),
+                        _ => evaluating::Value::String(SmolStr::new("foreign_placeholder")),
+                    }
+                } else {
+                    evaluating::Value::String(SmolStr::new("placeholder"))
+                }
+            }
+            _ => {
+                evaluating::Value::String(SmolStr::new("placeholder"))
+            }
+        };
+        env.modules.write().unwrap().insert((id, item_id), val);
+    }
+
+    // Pass 1: Actual evaluation to fix recursive closures
+    for _ in 0..10 {
+        for (item_id, _) in lowered.info.iter_term_item() {
+            if let Some(name) = &indexed.items[item_id].name {
+                if let Some(decl) = elaborated.declarations.iter().find(|d| d.name() == name) {
+                    if let corefn::Declaration::Value { expression, .. } = decl {
+                        if let Ok(val) = evaluating::eval(expression, &env) {
                             }
+                            env.modules.write().unwrap().insert((id, item_id), val);
                         }
                     }
                 }

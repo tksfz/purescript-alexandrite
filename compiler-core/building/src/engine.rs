@@ -804,7 +804,7 @@ impl QueryEngine {
                 let checked = this.checked(id)?;
                 let resolved = this.resolved(id)?;
                 let elaborated =
-                    elaborating::elaborate_module(id, &lowered, &checked, &resolved, &indexed)?;
+                    elaborating::elaborate_module(this, id, &lowered, &checked, &resolved, &indexed)?;
                 Ok(Arc::new(elaborated))
             },
         )

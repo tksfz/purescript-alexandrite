@@ -4,3 +4,22 @@ assertion_line: 12
 expression: report
 ---
 module Main
+
+value test =
+  {
+    "App": [
+      {
+        "Var": {
+          "Module": [
+            9,
+            0
+          ]
+        }
+      },
+      {
+        "Literal": {
+          "String": "Hello from PureScript interpreter!"
+        }
+      }
+    ]
+  }
