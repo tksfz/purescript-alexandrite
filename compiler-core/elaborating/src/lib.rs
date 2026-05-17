@@ -16,6 +16,7 @@ pub struct ElaborationContext<'a, Q> {
     _indexed: &'a IndexedModule,
     binder_names: FxHashMap<lowering::BinderId, SmolStr>,
     let_names: FxHashMap<lowering::LetBindingNameGroupId, SmolStr>,
+    pun_names: FxHashMap<lowering::RecordPunId, SmolStr>,
 }
 
 pub fn elaborate_module<Q: QueryProxy>(
@@ -37,6 +38,7 @@ where
         _indexed: indexed,
         binder_names: FxHashMap::default(),
         let_names: FxHashMap::default(),
+        pun_names: FxHashMap::default(),
     };
 
     for (id, kind) in lowered.info.iter_binder() {
@@ -358,10 +360,7 @@ where
             Expr::Literal(Literal::Char(value.unwrap_or('\0')))
         }
         ExpressionKind::Number { value, .. } => {
-            // CoreFn only has Int and Number (float). 
-            // For now, treat all Numbers as 0.0 or something similar if we don't have Float literal yet.
-            // Actually, let's check CoreFn Literal.
-            Expr::Literal(Literal::String(SmolStr::new("number_literal")))
+            Expr::Literal(Literal::Number(value.clone().unwrap_or_default()))
         }
         ExpressionKind::Variable { resolution } => {
             let var = match resolution {
@@ -374,8 +373,9 @@ where
                     let name = indexed_name_for_let(ctx, *l_id);
                     Var::Local(name)
                 }
-                Some(lowering::TermVariableResolution::RecordPun(_)) => {
-                    Var::Local(SmolStr::new("pun_placeholder"))
+                Some(lowering::TermVariableResolution::RecordPun(pun_id)) => {
+                    let name = ctx.pun_names.get(&pun_id).cloned().unwrap_or_else(|| SmolStr::new("pun_placeholder"));
+                    Var::Local(name)
                 }
                 None => {
                     return None;
@@ -878,6 +878,41 @@ where
         }
         BinderKind::Parenthesized { parenthesized } => {
             elaborate_binder(ctx, (*parenthesized)?)
+        }
+        BinderKind::Named { named, binder } => {
+            let name = named.clone()?;
+            let inner = elaborate_binder(ctx, (*binder)?)?;
+            ctx.binder_names.insert(id, name.clone());
+            Some(Binder::Named(name, Box::new(inner)))
+        }
+        BinderKind::Typed { binder, .. } => {
+            elaborate_binder(ctx, (*binder)?)
+        }
+        BinderKind::Array { array } => {
+            let mut core_args = Vec::new();
+            for b_id in array.iter() {
+                core_args.push(elaborate_binder(ctx, *b_id)?);
+            }
+            Some(Binder::Literal(corefn::LiteralBinder::Array(core_args)))
+        }
+        BinderKind::Record { record } => {
+            let mut fields = FxHashMap::default();
+            for item in record.iter() {
+                match item {
+                    lowering::BinderRecordItem::RecordField { name: Some(name), value: Some(value) } => {
+                        fields.insert(name.clone(), elaborate_binder(ctx, *value)?);
+                    }
+                    lowering::BinderRecordItem::RecordPun { id: pun_id, name: Some(name) } => {
+                        ctx.pun_names.insert(*pun_id, name.clone());
+                        fields.insert(name.clone(), Binder::Var(name.clone()));
+                    }
+                    _ => {}
+                }
+            }
+            Some(Binder::Literal(corefn::LiteralBinder::Object(fields)))
+        }
+        BinderKind::Number { value, .. } => {
+            Some(Binder::Literal(corefn::LiteralBinder::Number(value.clone().unwrap_or_default())))
         }
         _ => {
             None

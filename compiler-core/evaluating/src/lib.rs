@@ -9,6 +9,7 @@ use thiserror::Error;
 #[derive(Clone)]
 pub enum Value {
     Int(i32),
+    Number(f64),
     String(SmolStr),
     Char(char),
     Boolean(bool),
@@ -31,6 +32,7 @@ impl std::fmt::Debug for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Int(i) => write!(f, "{:?}", i),
+            Value::Number(n) => write!(f, "{:?}", n),
             Value::String(s) => write!(f, "{:?}", s),
             Value::Char(c) => write!(f, "{:?}", c),
             Value::Boolean(b) => write!(f, "{:?}", b),
@@ -107,6 +109,7 @@ pub fn eval(
     match expr {
         Expr::Literal(lit) => match lit {
             Literal::Int(i) => Ok(Value::Int(*i)),
+            Literal::Number(n) => Ok(Value::Number(n.parse().unwrap_or(0.0))),
             Literal::String(s) => Ok(Value::String(s.clone())),
             Literal::Char(c) => Ok(Value::Char(*c)),
             Literal::Boolean(b) => Ok(Value::Boolean(*b)),
@@ -246,11 +249,30 @@ fn bind_pattern(
             env.locals.insert(name.clone(), value);
             Ok(())
         }
+        Binder::Named(name, inner_binder) => {
+            env.locals.insert(name.clone(), value.clone());
+            bind_pattern(env, inner_binder, value)
+        }
         Binder::Wildcard => Ok(()),
         Binder::Literal(lit) => match (lit, value) {
             (corefn::LiteralBinder::Int(i1), Value::Int(i2)) if *i1 == i2 => Ok(()),
+            (corefn::LiteralBinder::Number(n1), Value::Number(n2)) if n1.parse::<f64>().unwrap_or(0.0) == n2 => Ok(()),
             (corefn::LiteralBinder::Boolean(b1), Value::Boolean(b2)) if *b1 == b2 => Ok(()),
             (corefn::LiteralBinder::String(s1), Value::String(s2)) if s1 == &s2 => Ok(()),
+            (corefn::LiteralBinder::Char(c1), Value::Char(c2)) if *c1 == c2 => Ok(()),
+            (corefn::LiteralBinder::Array(binders), Value::Array(values)) if binders.len() == values.len() => {
+                for (b, v) in binders.iter().zip(values.iter()) {
+                    bind_pattern(env, b, v.clone())?;
+                }
+                Ok(())
+            }
+            (corefn::LiteralBinder::Object(binder_fields), Value::Object(value_fields)) => {
+                for (field_name, b) in binder_fields.iter() {
+                    let v = value_fields.get(field_name).ok_or_else(|| EvalError::FFIError(format!("Pattern match failure: missing field {}", field_name)))?;
+                    bind_pattern(env, b, v.clone())?;
+                }
+                Ok(())
+            }
             _ => Err(EvalError::FFIError("Pattern match failure".into())),
         },
         Binder::Constructor(f1, t1, binders) => match value {
@@ -262,7 +284,6 @@ fn bind_pattern(
             }
             _ => Err(EvalError::FFIError(format!("Pattern match failure: expected constructor {:?}:{:?}, found {:?}", f1, t1, value))),
         },
-        _ => Err(EvalError::FFIError(format!("Unimplemented binder in eval: {:?}", binder))),
     }
 }
 
